@@ -1,0 +1,24 @@
+# Environment variables & secrets
+.env
+*.env
+
+# Python Virtual Environments
+.venv/
+venv/
+env/
+
+# Python Cache & Bytecode
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+
+# Local Output & Memory Caches
+.chroma/
+db/
+
+# IDE & OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
