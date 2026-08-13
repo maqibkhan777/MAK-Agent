@@ -4,6 +4,8 @@ python-dotenv
 litellm
 crewai-tools
 streamlit
+langgraph
+
 
 
 
