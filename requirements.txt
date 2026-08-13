@@ -1,11 +1,31 @@
-crewai
-langchain-groq
-python-dotenv
-litellm
-crewai-tools
-streamlit
-langgraph
+# Core Agentic & Graph Orchestration
+crewai>=0.100.0
+crewai-tools>=0.30.0
+langgraph>=0.2.0
+litellm>=1.40.0
+langchain-groq>=0.2.0
+python-dotenv>=1.0.0
 
+# UI & Interactive Command Center
+streamlit>=1.35.0
 
+# Web Scraping, Search & Automation Tools
+duckduckgo-search>=6.0.0
+googlesearch-python>=1.2.0
+playwright>=1.40.0
+beautifulsoup4>=4.12.0
+requests>=2.31.0
+feedparser>=6.0.0
+youtube-transcript-api>=0.6.0
+yfinance>=0.2.35
+arxiv>=2.1.0
 
+# Embeddings, Local Memory & Audio Synthesis
+sentence-transformers>=2.2.0
+gTTS>=2.5.0
+schedule>=1.2.0
 
+# Telemetry, Observability & Evaluation
+arize-phoenix>=4.0.0
+openinference-instrumentation-langchain>=0.1.0
+deepeval>=1.0.0

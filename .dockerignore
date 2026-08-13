@@ -1,0 +1,16 @@
+.git
+.gitignore
+.dockerignore
+.venv
+venv
+env
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache
+.vscode
+.idea
+.deepeval
+Launch_MAK.vbs
+run_mak.bat

@@ -9,6 +9,21 @@ if hasattr(sys.stderr, "reconfigure"):
 os.environ["PYTHONIOENCODING"] = "utf-8"
 
 from crewai.tools import tool
+from duckduckgo_search import DDGS
+
+@tool("Live Internet Search")
+def live_web_search(query: str) -> str:
+    """Use this tool to search the live internet for the absolute latest, up-to-date information, news, pricing, or documentation."""
+    try:
+        results = DDGS().text(query, max_results=5)
+        if not results:
+            return f"No results found for query: '{query}'"
+        formatted = []
+        for i, r in enumerate(results, 1):
+            formatted.append(f"{i}. Title: {r.get('title', '')}\n   Snippet: {r.get('body', '')}\n   URL: {r.get('href', '')}")
+        return "\n\n".join(formatted)
+    except Exception as e:
+        return f"Error executing live web search for '{query}': {e}"
 
 @tool("Dynamic Browser Tool")
 def dynamic_browser_tool(url: str) -> str:
@@ -31,3 +46,4 @@ def post_to_social_api(platform: str, content: str) -> str:
     msg = f"SUCCESS: Pushed to {platform} API: {content}"
     print(msg)
     return msg
+

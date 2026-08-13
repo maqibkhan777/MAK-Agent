@@ -1,0 +1,34 @@
+version: '3.8'
+
+services:
+  mak-enterprise:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: mak-enterprise-os
+    restart: unless-stopped
+    ports:
+      - "8501:8501"   # Streamlit Dashboard UI
+      - "6060:6060"   # Arize Phoenix Observability Tracing Server
+    env_file:
+      - .env
+    environment:
+      - STREAMLIT_SERVER_PORT=8501
+      - STREAMLIT_SERVER_ADDRESS=0.0.0.0
+      - PHOENIX_PORT=6060
+      - PHOENIX_HOST=0.0.0.0
+    volumes:
+      # Persistent SQLite Autonomy Engine Database
+      - ./scheduled_tasks.db:/app/scheduled_tasks.db
+      # Persistent User Uploads
+      - ./temp_uploads:/app/temp_uploads
+      # Persistent Central Company Knowledge Base
+      - ./company_knowledge_base:/app/company_knowledge_base
+      # Persistent Generated Reports and Audio Briefings
+      - ./output:/app/output
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8501/_stcore/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s

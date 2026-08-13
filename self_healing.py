@@ -63,6 +63,8 @@ def trigger_rescue_mission(error_traceback: str) -> str:
     rescue_crew = Crew(
         agents=[doctor, surgeon],
         tasks=[diagnosis_task, surgeon_task],
+        memory=True,
+        embedder={"provider": "huggingface", "config": {"model": "all-MiniLM-L6-v2"}},
         verbose=True
     )
 

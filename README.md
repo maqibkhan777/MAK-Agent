@@ -1,21 +1,50 @@
-# 🏦 MAK-Agent: Enterprise Finance Architecture with Autonomous Self-Healing
+# 🏛️ MAK-Agent: Autonomous Enterprise OS & Multi-Department Studio
 
-`MAK-Agent` is an autonomous enterprise AI platform built with **CrewAI**, **LangGraph**, **LiteLLM**, **Groq (Llama 3.1 8B / 3.3 70B)**, and **Streamlit**. It features a 5-agent Finance Department ecosystem, a token-compressing LangGraph state pipeline, a resilient fallback LLM router, and an autonomous self-healing debugging loop.
+[![LangGraph](https://img.shields.io/badge/Orchestrator-LangGraph-blue.svg)](https://github.com/langchain-ai/langgraph)
+[![CrewAI](https://img.shields.io/badge/Agent_Framework-CrewAI-red.svg)](https://github.com/crewAIInc/crewAI)
+[![LiteLLM](https://img.shields.io/badge/Router-LiteLLM-green.svg)](https://github.com/BerriAI/litellm)
+[![Groq](https://img.shields.io/badge/Inference-Groq_Llama_3.3_70B-orange.svg)](https://groq.com)
+[![Streamlit](https://img.shields.io/badge/UI-Streamlit-ff4b4b.svg)](https://streamlit.io)
+[![Docker](https://img.shields.io/badge/Container-Docker_Compose-2496ed.svg)](https://www.docker.com/)
+
+`MAK-Agent` is an autonomous enterprise AI operating system built with **LangGraph**, **CrewAI**, **LiteLLM**, **Groq (Llama 3.1 8B / 3.3 70B)**, and **Streamlit**. It coordinates specialized multi-agent departments, strict Pydantic output guardrails, real-time web scrapers, local vector memory, an autonomous background cron engine, Docker containerization, and an automated self-healing debugger.
 
 ---
 
-## 🏛️ Finance & Rescue Ecosystem Roster
+## 🏢 Enterprise Department Roster
 
-| Agent | Role | Domain & Capabilities |
+| Department | Key Agents | Core Mission & Specialized Tools |
 | :--- | :--- | :--- |
-| **CFO** | Chief Financial Officer | Executive capital allocation & board strategy synthesis. |
-| **Corp Finance Analyst** | Corporate Finance Specialist | Discounted Cash Flow (DCF), Net Present Value (NPV) & IRR. |
-| **Risk Manager** | Enterprise Risk Agent | Risk identification, Value at Risk (VaR), volatility & stress testing. |
-| **Treasury Manager** | Treasury & Liquidity Manager | Working capital optimization, cash conversion cycle & liquidity risk. |
-| **Capital Structure Analyst**| Capital Structure Specialist | Debt/equity mix optimization, leverage ratios & WACC calculation. |
-| **Context Summarizer** | Token Compression Agent | High-density 300-word state compression (prevents context snowballing). |
-| **Doctor** | Lead Systems Debugger | Plain-English stack trace parsing & root-cause diagnosis. |
-| **Surgeon** | Senior Software Engineer | Autonomous source-code patching (`FileWriterTool`) with HITL approval. |
+| **🕵️ Triage Gatekeeper** | Chief of Staff | Ingests user intent, searches Central RAG Knowledge Base, executes Chain-of-Thought routing to appropriate departments. |
+| **🏦 Finance & Risk** | CFO, Corporate Finance Analyst, Risk, Treasury, Capital Structure, M&A, Controller, Valuation, Credit, FP&A | DCF valuation, capital budgeting, WACC minimization, VaR analysis. Equipped with **Live Market Data Puller (`yfinance`)** and **Live Search**. |
+| **📣 Marketing Studio** | CMO, SEO & Trend Analyst, Lead Copywriter, Social Media Manager | Organic brand strategy, landing page copy, social posting. Equipped with **Live SEO Scraper (`googlesearch-python`)**, **Playwright Dynamic Browser**, and **Social Action API**. |
+| **📈 B2B Sales Engine** | Lead Gen Specialist, VP of Sales, SDR, Solutions Architect | Lead qualification, account dossiers, cold outreach. Equipped with **B2B Company Scraper (`duckduckgo-search` + `bs4`)** and strict **`SalesEmail`** guardrails. |
+| **💻 Software House** | Code Surgeon, Senior QA Tester, CTO, Senior Developer | Clean Python implementations, edge-case testing, LangGraph compatibility. Armed with **AST Python Syntax Checker** and **HITL File Writer** (Human-in-the-Loop approval). |
+| **🎬 Content House** | Creative Director, Scriptwriter, Hook Specialist, Graphic Designer, Video Producer | 5-agent omnichannel media studio. Equipped with **RSS Trend Scraper (`feedparser`)**, **YouTube Hook Analyzer (`youtube-transcript-api`)**, and **`OmnichannelDeliverable`** guardrails. |
+| **👨‍🏫 Education** | Finance Tutor | Step-by-step educational breakdowns of complex financial formulas and metrics. |
+| **🚑 Self-Healing Rescue** | Doctor (Diagnostician), Surgeon (Code Fixer) | Automated crash detection, stack-trace diagnosis, and source-code self-repair with human terminal confirmation. |
+
+---
+
+## 🛠️ Specialized Tool Ecosystem
+
+- 📊 **Live Market Data Puller (`yfinance`)**: Real-time stock prices, 52-week high/low, revenue, EBITDA, P/E ratios, and profit margins.
+- 🔍 **Live SEO Scraper (`googlesearch-python`)**: Live organic Google SERP competitor rankings and meta descriptions.
+- 🌐 **B2B Company Scraper (`duckduckgo-search` + `BeautifulSoup`)**: Scrapes target company homepages and extracts value propositions.
+- 🛡️ **AST Python Syntax Checker (`ast`)**: Pre-compiles Python source code to detect syntax errors before human review.
+- 🔒 **HITL File Writer**: Interactive Human-in-the-Loop terminal pause (`Approve these code changes? (y/n)`) prior to file writing.
+- 📡 **RSS Trend Scraper (`feedparser`)**: Real-time industry RSS feed ingestion and narrative extraction.
+- 🎥 **YouTube Hook Analyzer (`youtube-transcript-api`)**: Reverse-engineers viral opening 60-second video hooks.
+- 🎭 **Dynamic Browser Tool (`Playwright`)**: Headless browser automation for JavaScript-rendered web pages.
+- 🔎 **Live Internet Search (`DuckDuckGo`)**: Keyless live web research for breaking news and company data.
+
+---
+
+## 🛡️ Pydantic Guardrail Schemas
+
+- **`SalesEmail`**: Enforces consultative executive tone and programmatically rejects forbidden promotional terms like *"100% free"* or *"guarantee"*.
+- **`OmnichannelDeliverable`**: Standardizes multi-channel content across `written_post`, `video_script` (with text-on-screen cues), `b_roll_instructions`, and `image_generation_prompt` (Midjourney/DALL-E 3).
+- **`RoutingDecision`**: Requires step-by-step reasoning before selecting active department routes.
 
 ---
 
@@ -23,58 +52,65 @@
 
 ```text
 MAK-agent/
-├── self_healing.py        # Autonomous debugging rescue crew (Doctor & Surgeon agents)
-├── finance_department.py  # FinanceDepartment ecosystem class & resilient fallback router
-├── main.py                # LangGraph stateful execution graph & token compression pipeline
-├── app.py                 # Streamlit UI with error-catch wrapper & self-healing trigger
-├── requirements.txt       # Project dependencies (crewai, langgraph, litellm, streamlit, etc.)
-└── output/
-    └── agency_report.txt  # Automatically persisted executive reports
+├── app.py                       # Streamlit Command Center with Autonomy & Telemetry tabs
+├── main.py                      # Master LangGraph Orchestrator & multi-department StateGraph
+├── finance_department.py        # Finance Department (12+ specialists & resilient LLM router)
+├── marketing_department.py      # Marketing Department (SEO scraper, browser & social tools)
+├── sales_department.py          # Sales Department (B2B scraper & SalesEmail guardrail)
+├── engineering_department.py    # Engineering Department (AST syntax checker & HITL file writer)
+├── content_house_department.py  # Content House (5-agent studio & OmnichannelDeliverable)
+├── custom_tools.py              # Shared tools (Live Search, Playwright Browser, Social API)
+├── self_healing.py              # Autonomous Debugger (Doctor & Surgeon rescue crew)
+├── db_manager.py                # SQLite persistence manager for scheduled tasks
+├── autonomous_worker.py         # Autonomous background worker with TTS audio synthesis
+├── company_knowledge_base/      # Central Company Brain (RAG directory for SOPs & brand voice)
+├── requirements.txt             # Categorized dependency manifest
+├── Dockerfile                   # Python 3.11-slim container definition
+├── docker-compose.yml           # Multi-port container orchestration with persistent volumes
+├── Launch_MAK.vbs               # Silent one-click Windows desktop launcher
+└── run_mak.bat                  # Real-time console terminal launcher
 ```
-
----
-
-## 🔄 Core Pipeline Phases
-
-### Phase 1: Resilient Fallback LLM Router
-Automatically routes requests between `groq/llama-3.1-8b-instant` and `groq/llama-3.3-70b-versatile` with exponential backoff ($2\text{s}, 4\text{s}, 8\text{s}\dots$) on HTTP 429 RateLimitErrors.
-
-### Phase 2: LangGraph State & Token Compression
-Nodes execute sequentially through `AgencyState`. Intermediate reports are passed to the Context Compression Specialist to maintain high-density $\le 300$-word state updates, eliminating context window snowballing.
-
-### Phase 3: Autonomous Self-Healing Mechanic
-When runtime exceptions occur, `app.py` catches the stack trace and triggers `trigger_rescue_mission(error_traceback)`. The Doctor diagnoses the crash, and the Surgeon generates a source-code patch requiring Human-in-the-Loop terminal approval before overwriting files.
-
----
-
-## 🛠️ Tech Stack
-
-- **Orchestration**: [CrewAI](https://github.com/crewAIInc/crewAI) + [LangGraph](https://github.com/langchain-ai/langgraph)
-- **Routing**: [LiteLLM](https://github.com/BerriAI/litellm)
-- **LLM Engine**: [Groq](https://groq.com) (`llama-3.1-8b-instant` / `llama-3.3-70b-versatile`)
-- **UI**: Streamlit (Dark-mode Glassmorphism UI)
-- **Python**: Python 3.12 (`uv` environment)
 
 ---
 
 ## 🚀 Quickstart Guide
 
-```bash
-# 1. Clone & Navigate
+### Option A: Local Python Environment
+```powershell
+# 1. Clone the repository
 git clone https://github.com/maqibkhan777/MAK-Agent.git
 cd MAK-Agent
 
-# 2. Virtual Environment Setup
-uv venv --python 3.12 .venv
-.\.venv\Scripts\python.exe -m uv pip install -r requirements.txt -p .venv
+# 2. Create and activate virtual environment
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
 
-# 3. Environment Variables (.env)
-GROQ_API_KEY=your_groq_api_key_here
-SERPER_API_KEY=your_serper_api_key_here
+# 3. Install dependencies
+pip install -r requirements.txt
 
-# 4. Launch Streamlit Web UI
-.\.venv\Scripts\streamlit.exe run app.py
+# 4. Configure environment variables (.env)
+# Add your GROQ_API_KEY=gsk_...
+
+# 5. Launch the Command Center
+streamlit run app.py
+# Or double-click Launch_MAK.vbs on Windows
 ```
+
+### Option B: Docker Containerization
+```bash
+# Build and boot the entire system in detached mode
+docker compose up -d --build
+
+# Access Streamlit Dashboard at: http://localhost:8501
+# Access Arize Phoenix Observability at: http://localhost:6060
+```
+
+---
+
+## 🤖 Autonomy Engine & Observability
+
+- **Background Scheduling**: Set recurring prompts in the Streamlit **🤖 Autonomy Engine** tab. The background worker evaluates jobs every 60s, executes them through LangGraph, and speaks executive briefings aloud via `gTTS` audio (`output/briefing_task_<id>.mp3`).
+- **Arize Phoenix Observability**: Real-time tracing and telemetry for all LLM calls and LangChain spans accessible at `http://localhost:6060`.
 
 ---
 
