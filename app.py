@@ -132,6 +132,7 @@ def inject_custom_css():
         .badge-cto { background: rgba(59, 130, 246, 0.2); color: #60a5fa; border: 1px solid #60a5fa; }
         .badge-dev { background: rgba(16, 185, 129, 0.2); color: #34d399; border: 1px solid #34d399; }
         .badge-qa { background: rgba(245, 158, 11, 0.2); color: #fbbf24; border: 1px solid #fbbf24; }
+        .badge-research { background: rgba(168, 85, 247, 0.2); color: #c084fc; border: 1px solid #c084fc; }
 
         /* Custom scrollbar */
         ::-webkit-scrollbar {
@@ -331,6 +332,15 @@ with st.sidebar:
         </div>
         """, unsafe_allow_html=True)
 
+    with st.expander("🔬 Academic Research & Science", expanded=False):
+        st.markdown("""
+        <div class="agency-card">
+            <span class="role-badge badge-research">Researcher</span>
+            <h4 style="margin:0.2rem 0; color:#f8fafc;">Academic Researcher</h4>
+            <p style="margin:0; font-size:0.75rem; color:#94a3b8;">ArXiv peer-reviewed paper reviews & citations.</p>
+        </div>
+        """, unsafe_allow_html=True)
+
     st.markdown("---")
     st.caption("🛡️ Central Knowledge Base RAG & Self-Healing Debugger active.")
 
@@ -438,7 +448,11 @@ with tab1:
                             "raw_department_reports": {},
                             "department_summaries": {},
                             "final_response": "",
-                            "final_cfo_decision": ""
+                            "final_cfo_decision": "",
+                            "retry_count": 0,
+                            "inspector_feedback": "",
+                            "last_active_department": "",
+                            "inspector_decision": {}
                         }
                         final_state = graph.invoke(initial_state)
                         result_output = final_state.get("final_response") or final_state.get("final_cfo_decision", "")

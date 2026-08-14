@@ -48,7 +48,11 @@ def execute_autonomous_task(task: dict, current_date: str):
         "raw_department_reports": {},
         "department_summaries": {},
         "final_response": "",
-        "final_cfo_decision": ""
+        "final_cfo_decision": "",
+        "retry_count": 0,
+        "inspector_feedback": "",
+        "last_active_department": "",
+        "inspector_decision": {}
     }
 
     try:

@@ -19,6 +19,7 @@ feedparser>=6.0.0
 youtube-transcript-api>=0.6.0
 yfinance>=0.2.35
 arxiv>=2.1.0
+pyperclip>=1.8.0
 
 # Embeddings, Local Memory & Audio Synthesis
 sentence-transformers>=2.2.0

@@ -57,6 +57,7 @@ from marketing_department import MarketingDepartment
 from sales_department import SalesDepartment, get_sales_team, SalesEmail
 from engineering_department import EngineeringDepartment, get_engineering_team, hitl_file_writer
 from content_house_department import ContentHouseDepartment, get_content_team, OmnichannelDeliverable, ContentDeliverable
+from research_department import ResearchDepartment, get_research_team, arxiv_academic_scraper
 
 # Auto-create Central Company Brain Knowledge Base directory
 KNOWLEDGE_BASE_DIR = os.path.join(os.getcwd(), "company_knowledge_base")
@@ -86,7 +87,7 @@ class RoutingDecision(BaseModel):
         description="Explain your step-by-step logic for choosing the departments based on the user's intent. Do this first."
     )
     departments: List[str] = Field(
-        description="The final selected departments. Must be exact matches from the allowed list: ['cfo', 'corp_finance', 'risk', 'treasury', 'capital_structure', 'm_and_a', 'controller', 'portfolio', 'valuation', 'credit', 'inventory', 'planner', 'tutor', 'marketing', 'sales', 'engineering', 'content']."
+        description="The final selected departments. Must be exact matches from the allowed list: ['cfo', 'corp_finance', 'risk', 'treasury', 'capital_structure', 'm_and_a', 'controller', 'portfolio', 'valuation', 'credit', 'inventory', 'planner', 'tutor', 'marketing', 'sales', 'engineering', 'content', 'research']."
     )
 
 
@@ -162,6 +163,7 @@ def node_triage(state: AgencyState) -> dict:
             "- Sales Rule: If the user asks for lead generation, finding target companies, B2B outreach, cold emails, or prospect qualification, select strictly ['sales'].\n"
             "- Engineering Rule: If the user asks for writing Python scripts, debugging code, building software, checking code syntax, or modifying local files, select strictly ['engineering'].\n"
             "- Content House Rule: If the user asks for blog posts, YouTube video scripts, viral hooks, B-roll instructions, or banner/thumbnail image prompts, select strictly ['content'].\n"
+            "- Research Rule: If the user asks for scientific literature reviews, ArXiv academic papers, or empirical scientific research, select strictly ['research'].\n"
             "- Corporate Finance Rule: If the user asks for numerical, analytical, valuation, risk, M&A, treasury, or investment analysis, select the relevant corporate finance departments.\n"
             "- Direct CFO Rule: If the user asks for high-level board strategy or CFO advice without needing detailed department models, select ['cfo']."
         ),
@@ -182,8 +184,9 @@ def node_triage(state: AgencyState) -> dict:
             "Example 2: User asks to tweet about a new product. Reasoning: The user wants social media promotion. Departments: [\"marketing\"].\n"
             "Example 3: User asks for B2B target companies and cold outreach emails. Reasoning: The user wants lead generation and outbound sales. Departments: [\"sales\"].\n"
             "Example 4: User asks for a blog post, YouTube video script, or banner image prompt. Reasoning: The user wants content house media production. Departments: [\"content\"].\n"
-            "Example 5: User asks to write a Python script or debug code. Reasoning: The user wants software engineering and code implementation. Departments: [\"engineering\"].\n\n"
-            "Available departments: [\"cfo\", \"corp_finance\", \"risk\", \"treasury\", \"capital_structure\", \"m_and_a\", \"controller\", \"portfolio\", \"valuation\", \"credit\", \"inventory\", \"planner\", \"tutor\", \"marketing\", \"sales\", \"engineering\", \"content\"]."
+            "Example 5: User asks to write a Python script or debug code. Reasoning: The user wants software engineering and code implementation. Departments: [\"engineering\"].\n"
+            "Example 6: User asks for academic papers or ArXiv research on neural architectures. Reasoning: The user wants academic and scientific literature review. Departments: [\"research\"].\n\n"
+            "Available departments: [\"cfo\", \"corp_finance\", \"risk\", \"treasury\", \"capital_structure\", \"m_and_a\", \"controller\", \"portfolio\", \"valuation\", \"credit\", \"inventory\", \"planner\", \"tutor\", \"marketing\", \"sales\", \"engineering\", \"content\", \"research\"]."
         ),
         expected_output="A strict JSON object containing 'reasoning' (string) and 'departments' (list of strings).",
         agent=triage_agent
@@ -490,6 +493,50 @@ def content_node(state: AgencyState) -> dict:
 
 # Backwards compatibility alias
 node_content = content_node
+
+
+def research_node(state: AgencyState) -> dict:
+    """
+    Research Department Node: Executes an Academic Research workflow equipped with ArXiv scraper & knowledge base.
+    """
+    user_request = state.get("user_request", "")
+    llm = get_resilient_llm()
+    feedback = state.get("inspector_feedback", "")
+    feedback_prompt = f"\n\n[INSPECTOR GENERAL FEEDBACK TO ADDRESS IN REWRITE]:\n{feedback}" if feedback else ""
+
+    research_agents = get_research_team(llm=llm, knowledge_tool=knowledge_tool)
+    academic_researcher = research_agents[0]
+
+    research_task = Task(
+        description=(
+            f"Conduct rigorous scientific and academic literature review using ArXiv academic papers for: '{user_request}'. "
+            "Extract relevant theoretical findings, empirical results, citations, and structure a high-density academic briefing."
+            f"{feedback_prompt}"
+        ),
+        expected_output="Comprehensive academic literature review and scientific briefing grounded in ArXiv research.",
+        agent=academic_researcher
+    )
+
+    research_crew = Crew(
+        agents=[academic_researcher],
+        tasks=[research_task],
+        process=Process.sequential,
+        memory=True,
+        embedder=EMBEDDER_CONFIG,
+        cache=True,
+        verbose=True
+    )
+
+    raw_research_output = str(research_crew.kickoff())
+    return {
+        "raw_department_reports": {"research": raw_research_output},
+        "final_response": raw_research_output,
+        "last_active_department": "research"
+    }
+
+
+# Backwards compatibility alias
+node_research = research_node
 
 
 def node_corp_finance(state: AgencyState) -> dict:
@@ -824,7 +871,7 @@ def inspector_node(state: AgencyState) -> dict:
 # =====================================================================
 ALL_DEPARTMENTS = [
     "cfo", "corp_finance", "risk", "treasury", "capital_structure", "m_and_a",
-    "controller", "portfolio", "valuation", "credit", "inventory", "planner", "tutor", "marketing", "sales", "engineering", "content"
+    "controller", "portfolio", "valuation", "credit", "inventory", "planner", "tutor", "marketing", "sales", "engineering", "content", "research"
 ]
 
 def route_from_triage(state: AgencyState) -> list[str]:
@@ -848,6 +895,9 @@ def route_from_triage(state: AgencyState) -> list[str]:
 
         valid_depts = [d for d in depts if isinstance(d, str) and d in ALL_DEPARTMENTS]
         if valid_depts:
+            if "research" in valid_depts:
+                print(f"\n[Route From Triage] Academic Research request detected: ['research']\n")
+                return ["research"]
             if "content" in valid_depts:
                 print(f"\n[Route From Triage] Content House request detected: ['content']\n")
                 return ["content"]
@@ -894,6 +944,7 @@ def route_from_inspector(state: AgencyState) -> str:
         "sales": "sales",
         "engineering": "engineering",
         "content": "content",
+        "research": "research",
         "cfo_synthesis": "cfo_synthesis",
         "cfo": "cfo"
     }
@@ -915,6 +966,7 @@ workflow.add_node("marketing", node_marketing)
 workflow.add_node("sales", sales_node)
 workflow.add_node("engineering", engineering_node)
 workflow.add_node("content", content_node)
+workflow.add_node("research", research_node)
 workflow.add_node("cfo", node_cfo_direct)
 workflow.add_node("corp_finance", node_corp_finance)
 workflow.add_node("risk", node_risk)
@@ -954,10 +1006,13 @@ workflow.add_edge("engineering", "inspector")
 # 5. Content House Path: omnichannel content mini-crew routes to inspector
 workflow.add_edge("content", "inspector")
 
-# 6. Direct CFO Path: cfo routes to inspector
+# 6. Academic Research Path: research agent routes to inspector
+workflow.add_edge("research", "inspector")
+
+# 7. Direct CFO Path: cfo routes to inspector
 workflow.add_edge("cfo", "inspector")
 
-# 7. Corporate Path: Analytical department nodes run in parallel -> Summarizer -> CFO Synthesis -> inspector
+# 8. Corporate Path: Analytical department nodes run in parallel -> Summarizer -> CFO Synthesis -> inspector
 CORP_NODES = [
     "corp_finance", "risk", "treasury", "capital_structure", "m_and_a",
     "controller", "portfolio", "valuation", "credit", "inventory", "planner"
@@ -972,7 +1027,7 @@ workflow.add_edge("cfo_synthesis", "inspector")
 workflow.add_conditional_edges(
     "inspector",
     route_from_inspector,
-    ["tutor", "marketing", "sales", "engineering", "content", "cfo_synthesis", "cfo", END]
+    ["tutor", "marketing", "sales", "engineering", "content", "research", "cfo_synthesis", "cfo", END]
 )
 
 app_graph = workflow.compile()
@@ -989,6 +1044,7 @@ def run_agency(user_request: str) -> str:
     - Sales queries route: triage -> sales mini-crew -> inspector -> END.
     - Engineering queries route: triage -> engineering mini-crew -> inspector -> END.
     - Content House queries route: triage -> content mini-crew -> inspector -> END.
+    - Research queries route: triage -> academic researcher -> inspector -> END.
     - Corporate queries route: triage -> parallel depts -> summarizer -> CFO -> inspector -> END.
     """
     initial_state = {

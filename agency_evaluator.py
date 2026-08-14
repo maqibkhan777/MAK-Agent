@@ -244,6 +244,10 @@ def run_evaluation_suite() -> Dict[str, Any]:
                 "duration": duration
             })
 
+        # Step 2 & 3: API Throttling & Token Cooldown
+        print("Pausing for 15 seconds to respect API rate limits... Cooling down tokens.\n")
+        time.sleep(15)
+
     # =====================================================================
     # Step 5: Format & Print the Final Agency Health Scorecard
     # =====================================================================

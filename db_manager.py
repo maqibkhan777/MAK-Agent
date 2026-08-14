@@ -5,15 +5,17 @@ import os
 DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "scheduled_tasks.db")
 
 def get_connection():
-    """Returns a SQLite connection object."""
-    conn = sqlite3.connect(DB_PATH)
+    """Returns a SQLite connection object configured for safe multi-threaded access."""
+    conn = sqlite3.connect(DB_PATH, timeout=30.0, check_same_thread=False)
     conn.row_factory = sqlite3.Row
     return conn
 
 def init_db():
-    """Creates the scheduled_tasks table if it does not exist."""
+    """Creates the scheduled_tasks table if it does not exist and enables WAL mode."""
     with get_connection() as conn:
         cursor = conn.cursor()
+        cursor.execute("PRAGMA journal_mode=WAL;")
+        cursor.execute("PRAGMA busy_timeout=5000;")
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS scheduled_tasks (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,

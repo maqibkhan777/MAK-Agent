@@ -33,9 +33,15 @@ def dynamic_browser_tool(url: str) -> str:
         with sync_playwright() as p:
             browser = p.chromium.launch(headless=True)
             page = browser.new_page()
-            page.goto(url, wait_until="networkidle", timeout=30000)
+            try:
+                page.goto(url, wait_until="domcontentloaded", timeout=20000)
+            except Exception:
+                pass
             text = page.inner_text("body")
             browser.close()
+            # Truncate text to avoid blowing LLM context window
+            if len(text) > 15000:
+                text = text[:15000] + "\n\n[...Content truncated for LLM context optimization...]"
             return text
     except Exception as e:
         return f"Error executing dynamic browser navigation for {url}: {e}"
