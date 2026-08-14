@@ -176,7 +176,8 @@ def node_triage(state: AgencyState) -> dict:
             f"User Request: '{state['user_request']}'\n\n"
             "First, search the company knowledge base for relevant SOPs, brand guidelines, or routing policies.\n"
             "Then, write your step-by-step reasoning explaining why specific departments are required.\n"
-            "Finally, output the selected departments as a list.\n\n"
+            "Finally, output your decision as a strict, valid JSON object with 'reasoning' and 'departments':\n"
+            '```json\n{\n  "reasoning": "step-by-step reasoning...",\n  "departments": ["department_name"]\n}\n```\n\n'
             "Example 1: User asks 'Explain WACC step-by-step'. Reasoning: The user is asking an educational question to learn a concept. Departments: [\"tutor\"].\n"
             "Example 2: User asks to tweet about a new product. Reasoning: The user wants social media promotion. Departments: [\"marketing\"].\n"
             "Example 3: User asks for B2B target companies and cold outreach emails. Reasoning: The user wants lead generation and outbound sales. Departments: [\"sales\"].\n"
@@ -184,17 +185,13 @@ def node_triage(state: AgencyState) -> dict:
             "Example 5: User asks to write a Python script or debug code. Reasoning: The user wants software engineering and code implementation. Departments: [\"engineering\"].\n\n"
             "Available departments: [\"cfo\", \"corp_finance\", \"risk\", \"treasury\", \"capital_structure\", \"m_and_a\", \"controller\", \"portfolio\", \"valuation\", \"credit\", \"inventory\", \"planner\", \"tutor\", \"marketing\", \"sales\", \"engineering\", \"content\"]."
         ),
-        expected_output="A structured RoutingDecision object containing step-by-step reasoning and selected departments.",
-        output_pydantic=RoutingDecision,
+        expected_output="A strict JSON object containing 'reasoning' (string) and 'departments' (list of strings).",
         agent=triage_agent
     )
 
     crew = Crew(agents=[triage_agent], tasks=[triage_task], memory=True, embedder=EMBEDDER_CONFIG, cache=True, verbose=True)
     res = crew.kickoff()
-    if hasattr(res, "pydantic") and res.pydantic:
-        raw_output = res.pydantic.model_dump_json() if hasattr(res.pydantic, "model_dump_json") else res.pydantic.json()
-    else:
-        raw_output = str(res).strip()
+    raw_output = str(res).strip()
     return {"triage_output": raw_output}
 
 
@@ -290,12 +287,12 @@ def sales_node(state: AgencyState) -> dict:
         description=(
             f"Using the lead intelligence provided by the Lead Generation Specialist for: '{user_request}', "
             "craft a high-converting, consultative B2B cold outreach email. "
-            "Strictly adhere to the SalesEmail structured output schema with a compelling subject and consultative body. "
-            "Ensure zero spam triggers or prohibited phrases like '100% free' or 'guarantee'."
+            "Output your email as a strict JSON object matching this schema:\n"
+            '```json\n{\n  "subject": "Compelling subject line",\n  "body": "Executive consultative body"\n}\n```\n'
+            "Strictly ensure zero spam triggers or prohibited phrases like '100% free' or 'guarantee'."
             f"{feedback_prompt}"
         ),
-        expected_output="A structured SalesEmail object containing validated subject line and executive email body.",
-        output_pydantic=SalesEmail,
+        expected_output="A strict JSON object with 'subject' and 'body'.",
         agent=vp_sales
     )
 
@@ -310,10 +307,19 @@ def sales_node(state: AgencyState) -> dict:
     )
 
     res = sales_crew.kickoff()
-    if hasattr(res, "pydantic") and res.pydantic:
-        email_output = res.pydantic.model_dump_json(indent=2) if hasattr(res.pydantic, "model_dump_json") else res.pydantic.json(indent=2)
+    raw_res = str(res).strip()
+    if "```json" in raw_res:
+        clean_json = raw_res.split("```json")[1].split("```")[0].strip()
+    elif "```" in raw_res:
+        clean_json = raw_res.split("```")[1].split("```")[0].strip()
     else:
-        email_output = str(res).strip()
+        clean_json = raw_res
+
+    try:
+        validated = SalesEmail.model_validate_json(clean_json)
+        email_output = validated.model_dump_json(indent=2)
+    except Exception:
+        email_output = clean_json
 
     return {
         "raw_department_reports": {"sales": email_output},
@@ -437,13 +443,16 @@ def content_node(state: AgencyState) -> dict:
     task5_production = Task(
         description=(
             f"Synthesize all assets for '{user_request}' into a unified omnichannel deliverable. "
-            "Include the finalized written post, full video script with audio dialogue and text-on-screen (TOS) cues, "
-            "detailed B-roll visual directions mapped to the timeline, and the banner/thumbnail generation prompt. "
-            "Strictly format the final output conforming to the OmnichannelDeliverable Pydantic schema."
+            "Output your final result as a strict, valid JSON object matching the OmnichannelDeliverable schema:\n"
+            "```json\n{\n"
+            '  "written_post": "Complete written post for LinkedIn/Twitter/Blog...",\n'
+            '  "video_script": "Full video script with exact spoken dialogue and text-on-screen cues...",\n'
+            '  "b_roll_instructions": "Cinematic visual directions and B-roll cues mapped to timeline...",\n'
+            '  "image_generation_prompt": "Highly detailed Midjourney/DALL-E prompt for banner/thumbnail..."\n'
+            "}\n```\n"
             f"{feedback_prompt}"
         ),
-        expected_output="A structured OmnichannelDeliverable object containing written_post, video_script, b_roll_instructions, and image_generation_prompt.",
-        output_pydantic=OmnichannelDeliverable,
+        expected_output="A strict JSON object containing written_post, video_script, b_roll_instructions, and image_generation_prompt.",
         agent=video_producer
     )
 
@@ -458,10 +467,19 @@ def content_node(state: AgencyState) -> dict:
     )
 
     res = content_crew.kickoff()
-    if hasattr(res, "pydantic") and res.pydantic:
-        content_output = res.pydantic.model_dump_json(indent=2) if hasattr(res.pydantic, "model_dump_json") else res.pydantic.json(indent=2)
+    raw_res = str(res).strip()
+    if "```json" in raw_res:
+        clean_json = raw_res.split("```json")[1].split("```")[0].strip()
+    elif "```" in raw_res:
+        clean_json = raw_res.split("```")[1].split("```")[0].strip()
     else:
-        content_output = str(res).strip()
+        clean_json = raw_res
+
+    try:
+        validated = OmnichannelDeliverable.model_validate_json(clean_json)
+        content_output = validated.model_dump_json(indent=2)
+    except Exception:
+        content_output = clean_json
 
     return {
         "raw_department_reports": {"content": content_output},
@@ -754,10 +772,12 @@ def inspector_node(state: AgencyState) -> dict:
             "1. Completeness: Does the deliverable fully answer all aspects of the user's prompt?\n"
             "2. Formatting: Is the formatting clean, structured, and free of syntax/schema errors?\n"
             "3. Factuality: Is there zero hallucinated tool data or fabricated information?\n\n"
-            "Output status strictly as 'PASS' if acceptable, or 'FAIL' with exact feedback if defective."
+            "Output your audit decision strictly as a valid JSON object matching this schema:\n"
+            '```json\n{\n  "status": "PASS",\n  "feedback": ""\n}\n```\n'
+            'or if defective:\n'
+            '```json\n{\n  "status": "FAIL",\n  "feedback": "exact actionable reason for failure"\n}\n```'
         ),
-        expected_output="A structured InspectorDecision object containing status (PASS/FAIL) and exact feedback if failed.",
-        output_pydantic=InspectorDecision,
+        expected_output="A strict JSON object containing 'status' (PASS or FAIL) and 'feedback' (string).",
         agent=inspector_agent
     )
 

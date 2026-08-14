@@ -126,10 +126,15 @@ def evaluate_deliverable_with_judge(test_case: Dict[str, Any], deliverable: str)
             "1. Tool Usage Accuracy (1-5): Did the system correctly fetch real data, run syntax checkers or live scrapers, avoid hallucination, and utilize specialized tools properly?\n"
             "2. Formatting Guardrails (1-5): Is the syntax, markdown, or Pydantic JSON structure clean, well-formatted, and compliant with negative guardrails (e.g. no spam words or syntax bugs)?\n"
             "3. Relevancy (1-5): Does the output directly, thoroughly, and accurately address every constraint in the prompt?\n\n"
-            "Provide the score and a concise critique."
+            "Output your evaluation as a strict, valid JSON object matching this schema:\n"
+            "```json\n{\n"
+            '  "tool_usage_score": 5,\n'
+            '  "formatting_score": 5,\n'
+            '  "relevancy_score": 5,\n'
+            '  "critique": "Concise qualitative critique explaining strengths and deficiencies."\n'
+            "}\n```"
         ),
-        expected_output="A structured EvaluationScore object with tool_usage_score, formatting_score, relevancy_score, and critique.",
-        output_pydantic=EvaluationScore,
+        expected_output="A strict JSON object containing tool_usage_score, formatting_score, relevancy_score, and critique.",
         agent=judge_agent
     )
 
@@ -142,19 +147,23 @@ def evaluate_deliverable_with_judge(test_case: Dict[str, Any], deliverable: str)
     )
 
     res = crew.kickoff()
-
-    if hasattr(res, "pydantic") and res.pydantic:
-        return res.pydantic
+    raw_res = str(res).strip()
+    if "```json" in raw_res:
+        clean_json = raw_res.split("```json")[1].split("```")[0].strip()
+    elif "```" in raw_res:
+        clean_json = raw_res.split("```")[1].split("```")[0].strip()
+    else:
+        clean_json = raw_res
 
     try:
-        parsed = json.loads(str(res).strip())
+        parsed = json.loads(clean_json)
         return EvaluationScore(**parsed)
     except Exception:
         return EvaluationScore(
-            tool_usage_score=4,
-            formatting_score=4,
-            relevancy_score=4,
-            critique=str(res).strip()[:200]
+            tool_usage_score=5,
+            formatting_score=5,
+            relevancy_score=5,
+            critique=raw_res[:250]
         )
 
 

@@ -1,0 +1,53 @@
+AGENCY QA REPORT — MAK ENTERPRISE OS
+Generated At: 2026-08-14 01:36:24
+Overall Health Score: 0.0%
+Points: 0/45
+
+=== [ENGINEERING-001] Engineering ===
+Prompt: Write a Python script that uses the built-in `os` and `json` libraries to scan a directory, find all .json files, and merge them into a single dictionary. You must ensure the code is syntactically valid.
+Execution Error: Failed to convert text into a Pydantic model due to error: <failed_attempts>
+
+<generation number="1">
+<exception>
+    No tool calls or function call found in response (mode: TOOLS)
+</exception>
+<completion>
+    ModelResponse(id='chatcmpl-6eaefdc4-c907-48d0-906d-33157b966ec9', created=1786653301, model='llama-3.1-8b-instant', object='chat.completion', system_fingerprint='fp_4387d3edbb', choices=[Choices(finish_reason='stop', index=0, message=Message(content='{\n  "reasoning": "The user is asking for a specific Python script that uses the built-in `os` and `json` libraries to scan a directory, find all .json files, and merge them into a single dictionary. This indicates a request for software development and code implementation, which matches the Engineering SOP. Additionally, the user requires the code to be syntactically valid, suggesting that this task may involve debugging and code review, further aligning with the Engineering department. Therefore, the selected departments are [\'engineering\']. The task does not involve educational content, marketing campaigns, content production, or financial analysis, so these departments are not applicable.",\n  "departments": [\n    "engineering"\n  ]\n}', role='assistant', tool_calls=None, function_call=None, provider_specific_fields=None))], usage=Usage(completion_tokens=145, prompt_tokens=723, total_tokens=868, completion_tokens_details=CompletionTokensDetails(accepted_prediction_tokens=None, audio_tokens=0, reasoning_tokens=0, rejected_prediction_tokens=None), prompt_tokens_details=PromptTokensDetails(audio_tokens=0, cache_write_tokens=None, cached_tokens=512), queue_time=0.001943884, prompt_time=0.032738427, completion_time=0.124884133, total_time=0.15762256), usage_breakdown=None, x_groq={'id': 'req_01kzydbpe6e72r6x8rkfjqjm8e', 'seed': 1613749332}, service_tier='auto')
+</completion>
+</generation>
+
+</failed_attempts>
+
+<last_exception>
+    'NoneType' object is not iterable
+</last_exception>
+
+=== [FINANCE-002] Finance ===
+Prompt: Pull the live stock price and 52-week high for NVIDIA (NVDA) and Apple (AAPL). Write a strict 2-paragraph comparison of their current market standing based ONLY on the live data you pull.
+Execution Error: 2 validation errors for RoutingDecision
+reasoning
+  Field required [type=missing, input_value={'RoutingDecision': {'rea...nts': ['corp_finance']}}, input_type=dict]
+    For further information visit https://errors.pydantic.dev/2.12/v/missing
+departments
+  Field required [type=missing, input_value={'RoutingDecision': {'rea...nts': ['corp_finance']}}, input_type=dict]
+    For further information visit https://errors.pydantic.dev/2.12/v/missing
+
+=== [SALES-003] Sales ===
+Prompt: Find the core homepage messaging for the company 'Anthropic'. Based on their current website text, draft a highly personalized cold email from me pitching our custom local AI agent architecture.
+Execution Error: <failed_attempts>
+
+<generation number="1">
+<exception>
+    No tool calls or function call found in response (mode: TOOLS)
+</exception>
+<completion>
+    ModelResponse(id='chatcmpl-be0f7a93-3729-46d3-8f48-ba6031db6e9f', created=1786653384, model='llama-3.1-8b-instant', object='chat.completion', system_fingerprint='fp_4387d3edbb', choices=[Choices(finish_reason='stop', index=0, message=Message(content='{\n  "status": "FAIL",\n  "feedback": "The deliverable fully answers the prompt, but it contains some minor formatting and structuring issues. The \'video_script\' and \'b_roll_instructions\' sections have incorrect headings and indentations, and the \'image_generation_prompt\' contains excessive and unnecessary text about the image style, lighting, and mood. The excessive text makes the prompt difficult to read and understand. Furthermore, the deliverable does not contain a personalized cold email as requested by the prompt. A rewritten deliverable should include all necessary components and maintain a consistent formatting structure throughout. Please revise the deliverable to include a personalized cold email and ensure proper formatting and structuring."\n}', role='assistant', tool_calls=None, function_call=None, provider_specific_fields=None))], usage=Usage(completion_tokens=141, prompt_tokens=2544, total_tokens=2685, completion_tokens_details=CompletionTokensDetails(accepted_prediction_tokens=None, audio_tokens=0, reasoning_tokens=0, rejected_prediction_tokens=None), prompt_tokens_details=PromptTokensDetails(audio_tokens=0, cache_write_tokens=None, cached_tokens=0), queue_time=0.042497743, prompt_time=0.193428826, completion_time=0.328978556, total_time=0.522407382), usage_breakdown=None, x_groq={'id': 'req_01kzyde79cesjbte3wcp3tsdwy', 'seed': 1138139525}, service_tier='auto')
+</completion>
+</generation>
+
+</failed_attempts>
+
+<last_exception>
+    'NoneType' object is not iterable
+</last_exception>
+
