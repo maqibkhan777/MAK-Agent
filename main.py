@@ -52,12 +52,17 @@ from dotenv import load_dotenv
 from crewai import Agent, Task, Crew, Process
 from crewai_tools import DirectoryReadTool
 from langgraph.graph import StateGraph, START, END
+from langgraph.prebuilt import ToolNode, tools_condition
+from langgraph.graph.message import add_messages
+from langchain_core.messages import BaseMessage, SystemMessage, HumanMessage, AIMessage, ToolMessage
+from langchain_groq import ChatGroq
 from finance_department import FinanceDepartment, get_resilient_llm
 from marketing_department import MarketingDepartment
 from sales_department import SalesDepartment, get_sales_team, SalesEmail
 from engineering_department import EngineeringDepartment, get_engineering_team, hitl_file_writer
 from content_house_department import ContentHouseDepartment, get_content_team, OmnichannelDeliverable, ContentDeliverable
 from research_department import ResearchDepartment, get_research_team, arxiv_academic_scraper
+from custom_tools import dynamic_browser_tool, live_web_search, browser_tool, search_tool
 
 # Auto-create Central Company Brain Knowledge Base directory
 KNOWLEDGE_BASE_DIR = os.path.join(os.getcwd(), "company_knowledge_base")
@@ -68,6 +73,50 @@ knowledge_tool = DirectoryReadTool(directory="company_knowledge_base")
 
 # Ensure local output persistence directory exists
 os.makedirs("output", exist_ok=True)
+
+# =====================================================================
+# Streamlit Interface Configuration, CSS Injection & Sidebar Ingestion
+# =====================================================================
+try:
+    import streamlit as st
+    if hasattr(st, "session_state"):
+        try:
+            st.set_page_config(
+                page_title="MAK Enterprise AI Agency",
+                page_icon="⚡",
+                layout="wide",
+                initial_sidebar_state="expanded"
+            )
+        except Exception:
+            pass
+
+        # Immediately after st.set_page_config, inject CSS that hides #MainMenu, header, and footer
+        st.markdown("""
+        <style>
+            #MainMenu { visibility: hidden; display: none !important; }
+            header { visibility: hidden; display: none !important; }
+            footer { visibility: hidden; display: none !important; }
+            [data-testid="stHeader"] { visibility: hidden; display: none !important; }
+            [data-testid="stToolbar"] { visibility: hidden; display: none !important; }
+        </style>
+        """, unsafe_allow_html=True)
+
+        # Build the file uploader widget in the sidebar
+        with st.sidebar:
+            st.markdown("### 📁 Knowledge Base Ingestion")
+            uploaded_files = st.file_uploader(
+                "Upload Corporate Documents (.pdf, .txt, .docx, .md, .csv)",
+                type=["pdf", "txt", "docx", "md", "csv"],
+                accept_multiple_files=True
+            )
+            if uploaded_files:
+                for uploaded_file in uploaded_files:
+                    file_path = os.path.join(KNOWLEDGE_BASE_DIR, uploaded_file.name)
+                    with open(file_path, "wb") as f:
+                        f.write(uploaded_file.getbuffer())
+                    st.success(f"Ingested: {uploaded_file.name}")
+except ImportError:
+    st = None
 
 # Load environment variables securely from .env
 load_dotenv()
@@ -87,7 +136,7 @@ class RoutingDecision(BaseModel):
         description="Explain your step-by-step logic for choosing the departments based on the user's intent. Do this first."
     )
     departments: List[str] = Field(
-        description="The final selected departments. Must be exact matches from the allowed list: ['cfo', 'corp_finance', 'risk', 'treasury', 'capital_structure', 'm_and_a', 'controller', 'portfolio', 'valuation', 'credit', 'inventory', 'planner', 'tutor', 'marketing', 'sales', 'engineering', 'content', 'research']."
+        description="The final selected departments. Must be exact matches from the allowed list: ['cfo', 'corp_finance', 'risk', 'treasury', 'capital_structure', 'm_and_a', 'controller', 'portfolio', 'valuation', 'credit', 'inventory', 'planner', 'tutor', 'marketing', 'sales', 'engineering', 'content', 'research', 'general_ops']."
     )
 
 
@@ -126,6 +175,23 @@ class AgencyState(TypedDict):
     inspector_feedback: str
     last_active_department: str
     inspector_decision: dict
+    messages: Annotated[list[BaseMessage], add_messages]
+
+
+import concurrent.futures
+
+# =====================================================================
+# Helper: Thread-Safe Crew Kickoff Function (Async Event Loop Protection)
+# =====================================================================
+def _safe_kickoff(crew: Crew) -> str:
+    """Executes crew kickoff cleanly in an isolated thread to prevent event loop collision with LangGraph."""
+    try:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+            future = executor.submit(crew.kickoff)
+            return str(future.result())
+    except Exception as e:
+        print(f"[Crew Execution Notice]: {e}")
+        return str(crew.kickoff())
 
 
 # =====================================================================
@@ -139,7 +205,7 @@ def _compress_report(raw_report: str, department_name: str, summarizer: Agent) -
         agent=summarizer
     )
     crew = Crew(agents=[summarizer], tasks=[summary_task], memory=True, embedder=EMBEDDER_CONFIG, cache=True, verbose=True)
-    res = crew.kickoff()
+    res = _safe_kickoff(crew)
     return str(res)
 
 
@@ -157,7 +223,9 @@ def node_triage(state: AgencyState) -> dict:
             "You are the executive Chief of Staff. You analyze user inquiries using strict step-by-step reasoning. "
             "You consult the Central Company Knowledge Base to understand company structure and SOPs. "
             "You categorize requests and assign them to the exact right departments.\n\n"
+            "CRITICAL ROUTING MANDATE: If the user asks you to 'go to a website', 'search', 'browse', or do any generic task that is NOT strictly enterprise business strategy, you MUST route to 'general_ops'.\n\n"
             "Routing Rules:\n"
+            "- General Ops Rule: If the user asks you to 'go to a website', 'search', or do any generic task that is NOT strictly enterprise business strategy, you MUST route to 'general_ops'.\n"
             "- Educational Rule: If the user asks for explanations, tutorials, or to learn financial concepts (e.g. 'what is WACC?', 'explain NPV', 'how does DCF work?'), select strictly ['tutor'].\n"
             "- Marketing Rule: If the user asks for marketing campaigns, SEO research, landing page copy, social media posts, competitor website scraping, or brand promotion, select strictly ['marketing'].\n"
             "- Sales Rule: If the user asks for lead generation, finding target companies, B2B outreach, cold emails, or prospect qualification, select strictly ['sales'].\n"
@@ -176,6 +244,7 @@ def node_triage(state: AgencyState) -> dict:
     triage_task = Task(
         description=(
             f"User Request: '{state['user_request']}'\n\n"
+            "CRITICAL ROUTING MANDATE: If the user asks you to 'go to a website', 'search', or do any generic task that is NOT strictly enterprise business strategy, you MUST route to 'general_ops'.\n\n"
             "First, search the company knowledge base for relevant SOPs, brand guidelines, or routing policies.\n"
             "Then, write your step-by-step reasoning explaining why specific departments are required.\n"
             "Finally, output your decision as a strict, valid JSON object with 'reasoning' and 'departments':\n"
@@ -185,15 +254,16 @@ def node_triage(state: AgencyState) -> dict:
             "Example 3: User asks for B2B target companies and cold outreach emails. Reasoning: The user wants lead generation and outbound sales. Departments: [\"sales\"].\n"
             "Example 4: User asks for a blog post, YouTube video script, or banner image prompt. Reasoning: The user wants content house media production. Departments: [\"content\"].\n"
             "Example 5: User asks to write a Python script or debug code. Reasoning: The user wants software engineering and code implementation. Departments: [\"engineering\"].\n"
-            "Example 6: User asks for academic papers or ArXiv research on neural architectures. Reasoning: The user wants academic and scientific literature review. Departments: [\"research\"].\n\n"
-            "Available departments: [\"cfo\", \"corp_finance\", \"risk\", \"treasury\", \"capital_structure\", \"m_and_a\", \"controller\", \"portfolio\", \"valuation\", \"credit\", \"inventory\", \"planner\", \"tutor\", \"marketing\", \"sales\", \"engineering\", \"content\", \"research\"]."
+            "Example 6: User asks for academic papers or ArXiv research on neural architectures. Reasoning: The user wants academic and scientific literature review. Departments: [\"research\"].\n"
+            "Example 7: User asks to go to a website, browse a web page, or search online. Reasoning: The user wants generic web browsing and online task. Departments: [\"general_ops\"].\n\n"
+            "Available departments: [\"cfo\", \"corp_finance\", \"risk\", \"treasury\", \"capital_structure\", \"m_and_a\", \"controller\", \"portfolio\", \"valuation\", \"credit\", \"inventory\", \"planner\", \"tutor\", \"marketing\", \"sales\", \"engineering\", \"content\", \"research\", \"general_ops\"]."
         ),
         expected_output="A strict JSON object containing 'reasoning' (string) and 'departments' (list of strings).",
         agent=triage_agent
     )
 
     crew = Crew(agents=[triage_agent], tasks=[triage_task], memory=True, embedder=EMBEDDER_CONFIG, cache=True, verbose=True)
-    res = crew.kickoff()
+    res = _safe_kickoff(crew)
     raw_output = str(res).strip()
     return {"triage_output": raw_output}
 
@@ -435,10 +505,14 @@ def content_node(state: AgencyState) -> dict:
         agent=hook_specialist
     )
 
-    # Task 4: Graphic Designer creates Midjourney / DALL-E prompt
+    # Task 4: Graphic Designer creates text-to-image prompt and physically generates the image
     task4_visuals = Task(
-        description=f"Design a highly detailed, photorealistic Midjourney/DALL-E 3 text-to-image prompt for the banner/thumbnail for: '{user_request}'. Specify lighting, subject composition, artistic style, camera lens, and aspect ratio.",
-        expected_output="Production-grade text-to-image prompt for high-CTR thumbnail and header banner.",
+        description=(
+            f"Design a highly detailed, photorealistic text-to-image prompt for the banner/thumbnail for: '{user_request}'. "
+            "Specify lighting, subject composition, artistic style, camera lens, and aspect ratio. "
+            "You MUST invoke the generate_free_image tool with your detailed prompt and a descriptive filename to physically create and save the image asset."
+        ),
+        expected_output="Production-grade text-to-image prompt and confirmation of image file generation.",
         agent=graphic_designer
     )
 
@@ -537,6 +611,96 @@ def research_node(state: AgencyState) -> dict:
 
 # Backwards compatibility alias
 node_research = research_node
+
+
+def general_ops_node(state: AgencyState) -> dict:
+    """
+    General Operations Node: Executes generic web browsing and online chores via LangGraph ToolNode execution loop.
+    Uses standard automatic tool routing (tool_choice='auto') to prevent infinite loops.
+    """
+    user_request = state.get("user_request", "")
+    feedback = state.get("inspector_feedback", "")
+    feedback_prompt = f"\n\n[INSPECTOR GENERAL FEEDBACK TO ADDRESS IN REWRITE]:\n{feedback}" if feedback else ""
+
+    # Step 3: Dead simple stripped system prompt
+    web_driver_prompt = (
+        "You are a web driver. You have no internal knowledge. "
+        "You must execute the browser_tool or search_tool to satisfy the user's prompt and return ONLY the exact data you scrape."
+    )
+
+    # Initialize messages conversation history
+    messages = list(state.get("messages") or [])
+    if not messages:
+        messages = [
+            SystemMessage(content=web_driver_prompt),
+            HumanMessage(content=f"{user_request}{feedback_prompt}")
+        ]
+
+    # If the last message was a ToolMessage from ToolNode, return the final deliverable without looping
+    last_msg = messages[-1]
+    if isinstance(last_msg, ToolMessage):
+        final_text = str(last_msg.content)
+        ai_resp = AIMessage(content=final_text)
+        return {
+            "messages": [ai_resp],
+            "final_response": final_text,
+            "raw_department_reports": {"general_ops": final_text},
+            "last_active_department": "general_ops"
+        }
+
+    # Step 2 & 3: Standard automatic tool binding without hardcoded tool_choice constraint
+    api_key = os.getenv("GROQ_API_KEY")
+    chat_llm = ChatGroq(model_name="llama-3.3-70b-versatile", groq_api_key=api_key, max_retries=2)
+    chat_with_tools = chat_llm.bind_tools([browser_tool, search_tool])
+
+    try:
+        response = chat_with_tools.invoke(messages)
+    except Exception as e:
+        # Fallback parser for Groq tool-call format
+        err_str = str(e)
+        tool_call_match = re.search(r'<function=(\w+)[>:]?\s*({.*?})', err_str)
+        if tool_call_match:
+            fn_name = tool_call_match.group(1)
+            try:
+                fn_args = json.loads(tool_call_match.group(2))
+            except Exception:
+                fn_args = {"query": user_request}
+            response = AIMessage(
+                content="",
+                tool_calls=[{
+                    "name": fn_name,
+                    "args": fn_args,
+                    "id": f"call_{int(time.time()*1000)}"
+                }]
+            )
+        else:
+            if "http" in user_request or "www." in user_request:
+                url_m = re.findall(r'https?://[^\s<>"]+|www\.[^\s<>"]+', user_request)
+                t_url = url_m[0] if url_m else "https://www.google.com"
+                if not t_url.startswith("http"):
+                    t_url = "https://" + t_url
+                response = AIMessage(
+                    content="",
+                    tool_calls=[{"name": "browser_tool", "args": {"url": t_url}, "id": f"call_{int(time.time()*1000)}"}]
+                )
+            else:
+                response = AIMessage(
+                    content="",
+                    tool_calls=[{"name": "search_tool", "args": {"query": user_request}, "id": f"call_{int(time.time()*1000)}"}]
+                )
+
+    content_str = response.content if isinstance(response.content, str) else str(response.content)
+
+    return {
+        "messages": [response],
+        "final_response": content_str,
+        "raw_department_reports": {"general_ops": content_str},
+        "last_active_department": "general_ops"
+    }
+
+
+# Backwards compatibility alias
+node_general_ops = general_ops_node
 
 
 def node_corp_finance(state: AgencyState) -> dict:
@@ -836,7 +1000,7 @@ def inspector_node(state: AgencyState) -> dict:
         verbose=True
     )
 
-    res = inspector_crew.kickoff()
+    res = _safe_kickoff(inspector_crew)
     decision_data = {"status": "PASS", "feedback": ""}
 
     if hasattr(res, "pydantic") and res.pydantic:
@@ -871,7 +1035,7 @@ def inspector_node(state: AgencyState) -> dict:
 # =====================================================================
 ALL_DEPARTMENTS = [
     "cfo", "corp_finance", "risk", "treasury", "capital_structure", "m_and_a",
-    "controller", "portfolio", "valuation", "credit", "inventory", "planner", "tutor", "marketing", "sales", "engineering", "content", "research"
+    "controller", "portfolio", "valuation", "credit", "inventory", "planner", "tutor", "marketing", "sales", "engineering", "content", "research", "general_ops"
 ]
 
 def route_from_triage(state: AgencyState) -> list[str]:
@@ -879,10 +1043,26 @@ def route_from_triage(state: AgencyState) -> list[str]:
     Parses the validated RoutingDecision output from Chief of Staff to extract selected departments.
     CrewAI handles Pydantic validation, so output is a validated RoutingDecision object or JSON string.
     """
+    user_req = state.get("user_request", "").strip().lower()
     text = state.get("triage_output", "").strip()
 
+    # Direct fast-track for explicit generic web/search tasks
+    if any(k in user_req for k in ["go to", "visit", "browse", "scrape", "search the web", "search for", "google"]) and not any(k in user_req for k in ["wacc", "dcf", "valuation", "balance sheet", "income statement", "capital structure", "m&a", "merger", "ebitda"]):
+        if "general_ops" in ALL_DEPARTMENTS:
+            print(f"\n[Route From Triage Direct Match] Generic web/search request detected: ['general_ops']\n")
+            return ["general_ops"]
+
     try:
-        parsed = json.loads(text)
+        # 1. Clean and isolate JSON payload
+        clean_text = text
+        if "```json" in clean_text:
+            clean_text = clean_text.split("```json")[1].split("```")[0].strip()
+        elif "```" in clean_text:
+            clean_text = clean_text.split("```")[1].split("```")[0].strip()
+        elif "{" in clean_text and "}" in clean_text:
+            clean_text = clean_text[clean_text.find("{"):clean_text.rfind("}") + 1].strip()
+
+        parsed = json.loads(clean_text)
         if isinstance(parsed, dict):
             reasoning = parsed.get("reasoning", "")
             if reasoning:
@@ -895,6 +1075,9 @@ def route_from_triage(state: AgencyState) -> list[str]:
 
         valid_depts = [d for d in depts if isinstance(d, str) and d in ALL_DEPARTMENTS]
         if valid_depts:
+            if "general_ops" in valid_depts:
+                print(f"\n[Route From Triage] General Operations / Web Chore request detected: ['general_ops']\n")
+                return ["general_ops"]
             if "research" in valid_depts:
                 print(f"\n[Route From Triage] Academic Research request detected: ['research']\n")
                 return ["research"]
@@ -918,6 +1101,24 @@ def route_from_triage(state: AgencyState) -> list[str]:
 
     except Exception as e:
         print(f"\n[Triage Routing Notice] Exception parsing RoutingDecision JSON: '{text}'. Error: {e}\n")
+
+    # Fallback keyword detection if LLM did not format as JSON
+    lower_text = text.lower()
+    if "general_ops" in lower_text:
+        print(f"\n[Route From Triage Fallback] Detected 'general_ops' in triage output.\n")
+        return ["general_ops"]
+    if "research" in lower_text:
+        return ["research"]
+    if "content" in lower_text:
+        return ["content"]
+    if "engineering" in lower_text:
+        return ["engineering"]
+    if "tutor" in lower_text:
+        return ["tutor"]
+    if "sales" in lower_text:
+        return ["sales"]
+    if "marketing" in lower_text:
+        return ["marketing"]
 
     print(f"\n[Triage Routing Warning] Could not extract valid departments from output. Defaulting to ['cfo'].\n")
     return ["cfo"]
@@ -945,6 +1146,7 @@ def route_from_inspector(state: AgencyState) -> str:
         "engineering": "engineering",
         "content": "content",
         "research": "research",
+        "general_ops": "general_ops",
         "cfo_synthesis": "cfo_synthesis",
         "cfo": "cfo"
     }
@@ -967,6 +1169,7 @@ workflow.add_node("sales", sales_node)
 workflow.add_node("engineering", engineering_node)
 workflow.add_node("content", content_node)
 workflow.add_node("research", research_node)
+workflow.add_node("general_ops", general_ops_node)
 workflow.add_node("cfo", node_cfo_direct)
 workflow.add_node("corp_finance", node_corp_finance)
 workflow.add_node("risk", node_risk)
@@ -985,11 +1188,16 @@ workflow.add_node("summarizer", node_summarizer)
 workflow.add_node("cfo_synthesis", node_cfo)
 workflow.add_node("inspector", inspector_node)
 
+# Step 3 & 4: Define and add ToolNode for live browser tool execution
+tools_node = ToolNode([browser_tool, search_tool])
+workflow.add_node("tools", tools_node)
+
 # Entry Point -> Triage
 workflow.add_edge(START, "triage")
 
-# Dynamic Conditional Edges from Triage
-workflow.add_conditional_edges("triage", route_from_triage, ALL_DEPARTMENTS)
+# Dynamic Conditional Edges from Triage (Explicit Dict Mapping)
+TRIAGE_ROUTING_MAP = {d: d for d in ALL_DEPARTMENTS}
+workflow.add_conditional_edges("triage", route_from_triage, TRIAGE_ROUTING_MAP)
 
 # 1. Educational Path: tutor routes to inspector
 workflow.add_edge("tutor", "inspector")
@@ -1009,10 +1217,14 @@ workflow.add_edge("content", "inspector")
 # 6. Academic Research Path: research agent routes to inspector
 workflow.add_edge("research", "inspector")
 
-# 7. Direct CFO Path: cfo routes to inspector
+# Step 5: General Operations ToolNode Loop (conditional edge checks tool_calls, tools routes back)
+workflow.add_conditional_edges("general_ops", tools_condition, {"tools": "tools", "__end__": "inspector"})
+workflow.add_edge("tools", "general_ops")
+
+# 8. Direct CFO Path: cfo routes to inspector
 workflow.add_edge("cfo", "inspector")
 
-# 8. Corporate Path: Analytical department nodes run in parallel -> Summarizer -> CFO Synthesis -> inspector
+# 9. Corporate Path: Analytical department nodes run in parallel -> Summarizer -> CFO Synthesis -> inspector
 CORP_NODES = [
     "corp_finance", "risk", "treasury", "capital_structure", "m_and_a",
     "controller", "portfolio", "valuation", "credit", "inventory", "planner"
@@ -1027,7 +1239,7 @@ workflow.add_edge("cfo_synthesis", "inspector")
 workflow.add_conditional_edges(
     "inspector",
     route_from_inspector,
-    ["tutor", "marketing", "sales", "engineering", "content", "research", "cfo_synthesis", "cfo", END]
+    ["tutor", "marketing", "sales", "engineering", "content", "research", "general_ops", "cfo_synthesis", "cfo", END]
 )
 
 app_graph = workflow.compile()
@@ -1045,6 +1257,7 @@ def run_agency(user_request: str) -> str:
     - Engineering queries route: triage -> engineering mini-crew -> inspector -> END.
     - Content House queries route: triage -> content mini-crew -> inspector -> END.
     - Research queries route: triage -> academic researcher -> inspector -> END.
+    - General Operations queries route: triage -> executive assistant -> inspector -> END.
     - Corporate queries route: triage -> parallel depts -> summarizer -> CFO -> inspector -> END.
     """
     initial_state = {
@@ -1058,7 +1271,8 @@ def run_agency(user_request: str) -> str:
         "retry_count": 0,
         "inspector_feedback": "",
         "last_active_department": "",
-        "inspector_decision": {}
+        "inspector_decision": {},
+        "messages": []
     }
 
     final_state = app_graph.invoke(initial_state)

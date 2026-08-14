@@ -47,6 +47,19 @@ def run_qa_test() -> str:
     return output
 
 
+def connect_to_live_browser():
+    playwright = sync_playwright().start()
+    # Connect to the live Chrome instance listening on port 9222
+    try:
+        browser = playwright.chromium.connect_over_cdp("http://localhost:9222")
+        # Grab the first open tab (default context)
+        context = browser.contexts[0]
+        page = context.pages[0] if context.pages else context.new_page()
+        return page, browser, playwright
+    except Exception as e:
+        return f"CRITICAL ERROR: Could not connect to browser. Ensure Chrome is running with --remote-debugging-port=9222. Error: {e}"
+
+
 # =====================================================================
 # Step 3, 4 & 5: Analyze, Format, Clipboard & Launch Browser
 # =====================================================================
@@ -55,7 +68,7 @@ def analyze_and_route(qa_output: str):
     Parses the captured QA report:
     - If 100% PASS rate, prints a success message and exits.
     - If failures/warnings are detected, formats a master troubleshooting prompt,
-      copies it to the clipboard, and launches a visible Chrome browser to Gemini.
+      copies it to the clipboard, and connects to a live Chrome browser via CDP.
     """
     is_failing = False
     if "FAIL" in qa_output or "WARN" in qa_output or "Overall Agency Health    : 100" not in qa_output:
@@ -100,36 +113,38 @@ def analyze_and_route(qa_output: str):
     else:
         print("Notice: pyperclip is not available. Payload logged directly.")
 
-    # Step 5: The Playwright Action Layer (Non-headless Chrome)
+    # Step 5: The Playwright Action Layer (Live Chrome CDP Connection)
     print("\n" + "=" * 78)
-    print(" 🌐 LAUNCHING VISIBLE CHROME BROWSER CONTEXT...")
+    print(" 🌐 CONNECTING TO LIVE CHROME BROWSER VIA CDP (port 9222)...")
     print("=" * 78 + "\n")
 
+    browser_conn = connect_to_live_browser()
+    if isinstance(browser_conn, str):
+        print(f"\n{browser_conn}\n")
+        print("The failure report is copied to your clipboard. You can paste it directly into your browser.")
+        return
+
+    page, browser, playwright = browser_conn
     try:
-        with sync_playwright() as p:
-            browser = p.chromium.launch(headless=False)
-            context = browser.new_context()
-            page = context.new_page()
+        print("Navigating live Chrome tab to https://gemini.google.com/ ...")
+        page.goto("https://gemini.google.com/", timeout=60000)
 
-            print("Navigating to https://gemini.google.com/ ...")
-            page.goto("https://gemini.google.com/", timeout=60000)
+        print("\n" + "*" * 78)
+        print(" Live browser tab ready. The failure report is copied to your clipboard.")
+        print(" Focus the Gemini chat box, hit Ctrl+V to paste, and let's fix the code.")
+        print("*" * 78 + "\n")
 
-            print("\n" + "*" * 78)
-            print(" Browser launched. The failure report is copied to your clipboard.")
-            print(" Focus the Gemini chat box, hit Ctrl+V to paste, and let's fix the code.")
-            print("*" * 78 + "\n")
-
-            print("Press Enter in this terminal when you are finished consulting with the browser to close it...")
-            try:
-                input()
-            except (KeyboardInterrupt, EOFError):
-                pass
-            finally:
-                browser.close()
-                print("[Closed] Browser session finished.")
+        print("Press Enter in this terminal when you are finished consulting with the browser...")
+        try:
+            input()
+        except (KeyboardInterrupt, EOFError):
+            pass
     except Exception as browser_err:
-        print(f"Browser launch notice: {browser_err}")
+        print(f"Browser navigation notice: {browser_err}")
         print("\nThe failure report is copied to your clipboard. You can paste it directly into your browser.")
+    finally:
+        playwright.stop()
+        print("[Disconnected] Live browser CDP session finished.")
 
 
 if __name__ == "__main__":

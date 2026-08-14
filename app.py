@@ -33,10 +33,12 @@ def inject_custom_css():
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap');
 
-        /* Hide default Streamlit header, main menu, and footer */
-        #MainMenu { visibility: hidden; }
-        header { visibility: hidden; }
-        footer { visibility: hidden; }
+        /* Hide default Streamlit header, main menu, toolbar, and footer */
+        #MainMenu { visibility: hidden; display: none !important; }
+        header { visibility: hidden; display: none !important; }
+        footer { visibility: hidden; display: none !important; }
+        [data-testid="stHeader"] { visibility: hidden; display: none !important; }
+        [data-testid="stToolbar"] { visibility: hidden; display: none !important; }
 
         html, body, [class*="css"] {
             font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
@@ -133,6 +135,7 @@ def inject_custom_css():
         .badge-dev { background: rgba(16, 185, 129, 0.2); color: #34d399; border: 1px solid #34d399; }
         .badge-qa { background: rgba(245, 158, 11, 0.2); color: #fbbf24; border: 1px solid #fbbf24; }
         .badge-research { background: rgba(168, 85, 247, 0.2); color: #c084fc; border: 1px solid #c084fc; }
+        .badge-ops { background: rgba(56, 189, 248, 0.2); color: #38bdf8; border: 1px solid #38bdf8; }
 
         /* Custom scrollbar */
         ::-webkit-scrollbar {
@@ -338,6 +341,15 @@ with st.sidebar:
             <span class="role-badge badge-research">Researcher</span>
             <h4 style="margin:0.2rem 0; color:#f8fafc;">Academic Researcher</h4>
             <p style="margin:0; font-size:0.75rem; color:#94a3b8;">ArXiv peer-reviewed paper reviews & citations.</p>
+        </div>
+        """, unsafe_allow_html=True)
+
+    with st.expander("🌐 General Operations & Web Assistant", expanded=False):
+        st.markdown("""
+        <div class="agency-card">
+            <span class="role-badge badge-ops">Executive Assistant</span>
+            <h4 style="margin:0.2rem 0; color:#f8fafc;">Executive Assistant</h4>
+            <p style="margin:0; font-size:0.75rem; color:#94a3b8;">Live browser chores, web navigation & factual search.</p>
         </div>
         """, unsafe_allow_html=True)
 

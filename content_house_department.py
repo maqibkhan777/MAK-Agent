@@ -46,7 +46,7 @@ except ImportError:
     ChatGroq = None
 
 from finance_department import get_resilient_llm
-from custom_tools import live_web_search
+from custom_tools import live_web_search, generate_free_image
 
 
 # =====================================================================
@@ -252,17 +252,30 @@ class ContentHouseDepartment:
         return self.create_hook_specialist()
 
     def create_graphic_designer(self) -> Agent:
-        """4. Graphic Designer: Crafts precise, photorealistic Midjourney/DALL-E image generation prompts for banners & thumbnails."""
-        tools = [self.knowledge_tool] if self.knowledge_tool else []
+        """4. Graphic Designer: Crafts precise, photorealistic image prompts and physically generates downloadable image assets."""
+        tools = (
+            [generate_free_image, self.knowledge_tool, live_web_search]
+            if self.knowledge_tool
+            else [generate_free_image, live_web_search]
+        )
         return Agent(
             role="Graphic Designer",
             goal=(
-                "Craft highly detailed, production-grade text-to-image prompts (Midjourney/DALL-E 3) "
-                "for click-optimized YouTube thumbnails, blog headers, and social media banners based on the content narrative."
+                "Craft highly detailed, production-grade text-to-image visual assets for YouTube thumbnails, blog headers, "
+                "and social media banners. When asked to create visual assets, you MUST use the generate_free_image tool "
+                "to physically create the image. Pass your highly detailed prompt and a descriptive filename to the tool. "
+                "CRITICAL INSTRUCTION: To achieve true photorealism, you MUST append high-end photography terms to every image prompt. "
+                "Examples to include: '8k resolution, photorealistic, cinematic volumetric lighting, Unreal Engine 5 render, extremely detailed texture, shot on 35mm lens.' "
+                "Do not use cartoonish or simple descriptions."
             ),
             backstory=(
                 "You are an expert AI Visual Artist & Graphic Designer specialized in visual storytelling, color theory, "
-                "contrast framing, lighting aesthetics, photorealistic rendering parameters, and high-CTR thumbnail psychology."
+                "contrast framing, lighting aesthetics, photorealistic rendering parameters, and high-CTR thumbnail psychology. "
+                "When asked to create visual assets, you MUST use the generate_free_image tool to physically create the image. "
+                "Pass your highly detailed prompt and a descriptive filename to the tool. "
+                "CRITICAL INSTRUCTION: To achieve true photorealism, you MUST append high-end photography terms to every image prompt. "
+                "Examples to include: '8k resolution, photorealistic, cinematic volumetric lighting, Unreal Engine 5 render, extremely detailed texture, shot on 35mm lens.' "
+                "Do not use cartoonish or simple descriptions."
             ),
             tools=tools,
             verbose=True,
