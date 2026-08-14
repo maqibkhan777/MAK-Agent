@@ -3,7 +3,7 @@ rem =====================================================================
 rem MAK - Autonomous Cognitive Core (Unified One-Click Launcher)
 rem Starts FastAPI Backend + Vite Dev Server + Electron Native Desktop App
 rem =====================================================================
-title MAK // Autonomous Cognitive Core
+title MAK // Autonomous Cognitive Core Launcher
 color 0B
 
 echo =====================================================================
@@ -19,6 +19,6 @@ if not exist "node_modules" (
     call npm install
 )
 
-echo [Launcher] Launching MAK Enterprise Desktop OS...
+echo [Launcher] Initializing FastAPI Server ^& MAK Desktop OS...
 call npm run electron:dev
 

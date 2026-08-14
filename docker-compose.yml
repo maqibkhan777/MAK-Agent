@@ -8,13 +8,11 @@ services:
     container_name: mak-enterprise-os
     restart: unless-stopped
     ports:
-      - "8501:8501"   # Streamlit Dashboard UI
+      - "8000:8000"   # Headless FastAPI Backend
       - "6060:6060"   # Arize Phoenix Observability Tracing Server
     env_file:
       - .env
     environment:
-      - STREAMLIT_SERVER_PORT=8501
-      - STREAMLIT_SERVER_ADDRESS=0.0.0.0
       - PHOENIX_PORT=6060
       - PHOENIX_HOST=0.0.0.0
     volumes:
@@ -27,7 +25,7 @@ services:
       # Persistent Generated Reports and Audio Briefings
       - ./output:/app/output
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8501/_stcore/health"]
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
       interval: 30s
       timeout: 10s
       retries: 3

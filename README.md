@@ -52,7 +52,11 @@
 
 ```text
 MAK-agent/
-├── app.py                       # Streamlit Command Center with Autonomy & Telemetry tabs
+├── desktop_client/              # Native Electron + Vite + React + Tailwind Desktop App
+│   ├── electron/main.js         # Electron 1200x800 hidden titlebar desktop window
+│   ├── src/App.jsx              # Modern Dark-Themed Multi-Department Chat Client
+│   └── package.json             # Desktop app dependencies and build scripts
+├── server.py                    # Headless FastAPI Server with /api/chat & CORS middleware
 ├── main.py                      # Master LangGraph Orchestrator & multi-department StateGraph
 ├── finance_department.py        # Finance Department (12+ specialists & resilient LLM router)
 ├── marketing_department.py      # Marketing Department (SEO scraper, browser & social tools)
@@ -67,7 +71,7 @@ MAK-agent/
 ├── requirements.txt             # Categorized dependency manifest
 ├── Dockerfile                   # Python 3.11-slim container definition
 ├── docker-compose.yml           # Multi-port container orchestration with persistent volumes
-├── Launch_MAK.vbs               # Silent one-click Windows desktop launcher
+├── launch_desktop.bat           # One-click Electron Desktop App launcher
 └── run_mak.bat                  # Real-time console terminal launcher
 ```
 
@@ -75,34 +79,22 @@ MAK-agent/
 
 ## 🚀 Quickstart Guide
 
-### Option A: Local Python Environment
+### 1. Launch the Headless FastAPI Server
 ```powershell
-# 1. Clone the repository
-git clone https://github.com/maqibkhan777/MAK-Agent.git
-cd MAK-Agent
-
-# 2. Create and activate virtual environment
-python -m venv .venv
-.\.venv\Scripts\Activate.ps1
-
-# 3. Install dependencies
-pip install -r requirements.txt
-
-# 4. Configure environment variables (.env)
-# Add your GROQ_API_KEY=gsk_...
-
-# 5. Launch the Command Center
-streamlit run app.py
-# Or double-click Launch_MAK.vbs on Windows
+# In root directory:
+python server.py
+# Or run with uvicorn:
+# uvicorn server:app --host 0.0.0.0 --port 8000 --reload
 ```
 
-### Option B: Docker Containerization
-```bash
-# Build and boot the entire system in detached mode
-docker compose up -d --build
+### 2. Launch the Native Electron Desktop Client
+```powershell
+# Navigate to desktop_client directory:
+cd desktop_client
+npm run electron:dev
 
-# Access Streamlit Dashboard at: http://localhost:8501
-# Access Arize Phoenix Observability at: http://localhost:6060
+# Or simply double-click: launch_desktop.bat
+```
 ```
 
 ---

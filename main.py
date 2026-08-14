@@ -9,13 +9,12 @@ import re
 # Top-level tracing for all downstream LLM calls and LangChain spans
 # =====================================================================
 try:
-    import phoenix as px
     from openinference.instrumentation.langchain import LangChainInstrumentor
-
-    # Launch local Phoenix server and register LangChain instrumentor
-    px.launch_app()
     LangChainInstrumentor().instrument()
-    print("[Arize Phoenix] Observability server active and LangChain instrumented.")
+    if os.getenv("ENABLE_PHOENIX_UI", "false").lower() in ("true", "1"):
+        import phoenix as px
+        px.launch_app(host=os.getenv("PHOENIX_HOST", "0.0.0.0"), port=int(os.getenv("PHOENIX_PORT", 6060)))
+        print("[Arize Phoenix] Observability server active and LangChain instrumented.")
 except Exception as _px_err:
     print(f"[Arize Phoenix] Instrumentation notice: {_px_err}")
 
@@ -63,6 +62,9 @@ from engineering_department import EngineeringDepartment, get_engineering_team, 
 from content_house_department import ContentHouseDepartment, get_content_team, OmnichannelDeliverable, ContentDeliverable
 from research_department import ResearchDepartment, get_research_team, arxiv_academic_scraper
 from custom_tools import dynamic_browser_tool, live_web_search, browser_tool, search_tool
+from pc_control_tools import pc_tools, run_application, close_application, search_local_file
+from key_vault import vault
+from memory_engine import memory
 
 # Auto-create Central Company Brain Knowledge Base directory
 KNOWLEDGE_BASE_DIR = os.path.join(os.getcwd(), "company_knowledge_base")
@@ -74,49 +76,6 @@ knowledge_tool = DirectoryReadTool(directory="company_knowledge_base")
 # Ensure local output persistence directory exists
 os.makedirs("output", exist_ok=True)
 
-# =====================================================================
-# Streamlit Interface Configuration, CSS Injection & Sidebar Ingestion
-# =====================================================================
-try:
-    import streamlit as st
-    if hasattr(st, "session_state"):
-        try:
-            st.set_page_config(
-                page_title="MAK Enterprise AI Agency",
-                page_icon="⚡",
-                layout="wide",
-                initial_sidebar_state="expanded"
-            )
-        except Exception:
-            pass
-
-        # Immediately after st.set_page_config, inject CSS that hides #MainMenu, header, and footer
-        st.markdown("""
-        <style>
-            #MainMenu { visibility: hidden; display: none !important; }
-            header { visibility: hidden; display: none !important; }
-            footer { visibility: hidden; display: none !important; }
-            [data-testid="stHeader"] { visibility: hidden; display: none !important; }
-            [data-testid="stToolbar"] { visibility: hidden; display: none !important; }
-        </style>
-        """, unsafe_allow_html=True)
-
-        # Build the file uploader widget in the sidebar
-        with st.sidebar:
-            st.markdown("### 📁 Knowledge Base Ingestion")
-            uploaded_files = st.file_uploader(
-                "Upload Corporate Documents (.pdf, .txt, .docx, .md, .csv)",
-                type=["pdf", "txt", "docx", "md", "csv"],
-                accept_multiple_files=True
-            )
-            if uploaded_files:
-                for uploaded_file in uploaded_files:
-                    file_path = os.path.join(KNOWLEDGE_BASE_DIR, uploaded_file.name)
-                    with open(file_path, "wb") as f:
-                        f.write(uploaded_file.getbuffer())
-                    st.success(f"Ingested: {uploaded_file.name}")
-except ImportError:
-    st = None
 
 # Load environment variables securely from .env
 load_dotenv()
@@ -160,20 +119,31 @@ def merge_dict(a: dict, b: dict) -> dict:
     return res
 
 
+def merge_str(a: str, b: str) -> str:
+    """Merges string updates. Prioritizes latest non-empty string revision."""
+    if b and b.strip():
+        return b.strip()
+    return (a or "").strip()
+
+
 # =====================================================================
 # 1. LangGraph Shared State Definition
 # =====================================================================
 class AgencyState(TypedDict):
     user_request: str
+    session_id: str
+    cognitive_memory: str
     triage_output: str
+    triage_action: str
     selected_departments: list[str]
+    collaborating_departments: list[str]
     raw_department_reports: Annotated[dict[str, str], merge_dict]
     department_summaries: dict[str, str]
-    final_response: str
+    final_response: Annotated[str, merge_str]
     final_cfo_decision: str
     retry_count: int
     inspector_feedback: str
-    last_active_department: str
+    last_active_department: Annotated[str, merge_str]
     inspector_decision: dict
     messages: Annotated[list[BaseMessage], add_messages]
 
@@ -213,60 +183,137 @@ def _compress_report(raw_report: str, department_name: str, summarizer: Agent) -
 # 2. LangGraph Node Definitions (Stateful Execution Pipeline)
 # =====================================================================
 
+TRIAGE_SYSTEM_PROMPT = (
+    "You are the executive Chief of Staff of MAK Enterprise AI Agency.\n"
+    "Your mission is to understand user intent with complete clarity and make smart routing decisions.\n\n"
+    "CRITICAL OPERATIONAL RULES:\n"
+    "1. CONVERSATIONAL & CLARIFY FIRST (DO NOT GUESS):\n"
+    "   - If the user's prompt is a greeting (e.g., 'hi', 'hello', 'who are you'), conversational, vague, open-ended, or lacks essential parameters/context to execute properly (e.g., 'search the web', 'help with marketing', 'write code', 'find competitors', 'do market research'):\n"
+    "     -> You MUST NOT guess or launch an arbitrary department workflow.\n"
+    "     -> Set 'action': 'CLARIFY'.\n"
+    "     -> In 'clarification_response', write an engaging, professional, consultative response. Acknowledge their goal and ask 2-3 focused clarifying questions to gather the missing requirements (e.g., specific topics, URLs, target audience, metrics, desired output format).\n\n"
+    "2. CONCRETE DIRECTIVE ROUTING:\n"
+    "   - When the user's prompt is concrete, actionable, and contains clear targets or parameters:\n"
+    "     -> Set 'action': 'ROUTE'.\n"
+    "     -> Select the 'primary_department' from the allowed list: ['general_ops', 'research', 'marketing', 'sales', 'engineering', 'content', 'tutor', 'corp_finance', 'risk', 'treasury', 'capital_structure', 'm_and_a', 'controller', 'portfolio', 'valuation', 'credit', 'inventory', 'planner', 'cfo'].\n"
+    "     -> Select any 'collaborating_departments' if cross-department collaboration is needed.\n\n"
+    "   DEPARTMENT SPECIALTIES & MANDATES:\n"
+    "   - 'general_ops': (MANDATORY FOR SEARCH & PC CONTROL) Live web searches, internet queries, browsing URLs, online lookups, web scraping, and Windows PC operations (opening/running desktop apps, closing apps, searching local files).\n"
+    "   - 'research': Scientific literature reviews, academic research papers (ArXiv).\n"
+    "   - 'marketing': SEO keyword strategies, landing page copy, marketing campaigns, ad copy.\n"
+    "   - 'sales': B2B lead prospecting, cold outreach sequences, email campaigns.\n"
+    "   - 'engineering': Writing Python software, debugging scripts, AST code syntax validation.\n"
+    "   - 'content': Omnichannel content studio, YouTube scripts, viral hooks, B-roll cues.\n"
+    "   - 'tutor': Educational explanations and tutorials on business/financial concepts.\n"
+    "   - 'cfo': High-level executive board strategy and corporate governance.\n"
+    "   - 'corp_finance', 'valuation', 'risk', 'treasury', 'capital_structure', 'm_and_a': Quantitative financial models and valuations.\n\n"
+    "3. CONCISE STRUCTURE & HYPERLINK CITATIONS:\n"
+    "   - All responses must be concise, structured with clear markdown headers (###), bold metrics, and structured bullet points.\n"
+    "   - All citations and links MUST be formatted as clean Markdown hyperlinks `[Source Title](URL)` with meaningful anchor text. Never dump raw bare URLs.\n\n"
+    "OUTPUT FORMAT (STRICT JSON ONLY):\n"
+    "{\n"
+    '  "action": "CLARIFY" | "ROUTE",\n'
+    '  "clarification_response": "Your conversational response with clarifying questions (if action is CLARIFY)",\n'
+    '  "reasoning": "Step-by-step logic for clarification or chosen department(s)",\n'
+    '  "primary_department": "department_name",\n'
+    '  "collaborating_departments": ["dept1", "dept2"] (keep empty [] unless cross-department collaboration is strictly needed)\n'
+    "}"
+)
+
+
 def node_triage(state: AgencyState) -> dict:
-    """Chief of Staff (Triage): Searches Knowledge Base SOPs, analyzes user request, and outputs structured RoutingDecision with reasoning and departments."""
-    llm = get_resilient_llm()
-    triage_agent = Agent(
-        role="Chief of Staff (Triage)",
-        goal="Analyze user request intent step-by-step, consult Knowledge Base company guidelines, and select appropriate department routing.",
-        backstory=(
-            "You are the executive Chief of Staff. You analyze user inquiries using strict step-by-step reasoning. "
-            "You consult the Central Company Knowledge Base to understand company structure and SOPs. "
-            "You categorize requests and assign them to the exact right departments.\n\n"
-            "CRITICAL ROUTING MANDATE: If the user asks you to 'go to a website', 'search', 'browse', or do any generic task that is NOT strictly enterprise business strategy, you MUST route to 'general_ops'.\n\n"
-            "Routing Rules:\n"
-            "- General Ops Rule: If the user asks you to 'go to a website', 'search', or do any generic task that is NOT strictly enterprise business strategy, you MUST route to 'general_ops'.\n"
-            "- Educational Rule: If the user asks for explanations, tutorials, or to learn financial concepts (e.g. 'what is WACC?', 'explain NPV', 'how does DCF work?'), select strictly ['tutor'].\n"
-            "- Marketing Rule: If the user asks for marketing campaigns, SEO research, landing page copy, social media posts, competitor website scraping, or brand promotion, select strictly ['marketing'].\n"
-            "- Sales Rule: If the user asks for lead generation, finding target companies, B2B outreach, cold emails, or prospect qualification, select strictly ['sales'].\n"
-            "- Engineering Rule: If the user asks for writing Python scripts, debugging code, building software, checking code syntax, or modifying local files, select strictly ['engineering'].\n"
-            "- Content House Rule: If the user asks for blog posts, YouTube video scripts, viral hooks, B-roll instructions, or banner/thumbnail image prompts, select strictly ['content'].\n"
-            "- Research Rule: If the user asks for scientific literature reviews, ArXiv academic papers, or empirical scientific research, select strictly ['research'].\n"
-            "- Corporate Finance Rule: If the user asks for numerical, analytical, valuation, risk, M&A, treasury, or investment analysis, select the relevant corporate finance departments.\n"
-            "- Direct CFO Rule: If the user asks for high-level board strategy or CFO advice without needing detailed department models, select ['cfo']."
-        ),
-        tools=[knowledge_tool],
-        verbose=True,
-        memory=True,
-        llm=llm
-    )
+    """Chief of Staff (Triage & Clarification Engine): Analyzes prompt, engages in consultative dialogue if underspecified, or routes to specialists."""
+    user_request = state.get("user_request", "").strip()
+    cognitive_memory = state.get("cognitive_memory", "")
+    api_key = vault.get_active_key("groq") or os.getenv("GROQ_API_KEY")
 
-    triage_task = Task(
-        description=(
-            f"User Request: '{state['user_request']}'\n\n"
-            "CRITICAL ROUTING MANDATE: If the user asks you to 'go to a website', 'search', or do any generic task that is NOT strictly enterprise business strategy, you MUST route to 'general_ops'.\n\n"
-            "First, search the company knowledge base for relevant SOPs, brand guidelines, or routing policies.\n"
-            "Then, write your step-by-step reasoning explaining why specific departments are required.\n"
-            "Finally, output your decision as a strict, valid JSON object with 'reasoning' and 'departments':\n"
-            '```json\n{\n  "reasoning": "step-by-step reasoning...",\n  "departments": ["department_name"]\n}\n```\n\n'
-            "Example 1: User asks 'Explain WACC step-by-step'. Reasoning: The user is asking an educational question to learn a concept. Departments: [\"tutor\"].\n"
-            "Example 2: User asks to tweet about a new product. Reasoning: The user wants social media promotion. Departments: [\"marketing\"].\n"
-            "Example 3: User asks for B2B target companies and cold outreach emails. Reasoning: The user wants lead generation and outbound sales. Departments: [\"sales\"].\n"
-            "Example 4: User asks for a blog post, YouTube video script, or banner image prompt. Reasoning: The user wants content house media production. Departments: [\"content\"].\n"
-            "Example 5: User asks to write a Python script or debug code. Reasoning: The user wants software engineering and code implementation. Departments: [\"engineering\"].\n"
-            "Example 6: User asks for academic papers or ArXiv research on neural architectures. Reasoning: The user wants academic and scientific literature review. Departments: [\"research\"].\n"
-            "Example 7: User asks to go to a website, browse a web page, or search online. Reasoning: The user wants generic web browsing and online task. Departments: [\"general_ops\"].\n\n"
-            "Available departments: [\"cfo\", \"corp_finance\", \"risk\", \"treasury\", \"capital_structure\", \"m_and_a\", \"controller\", \"portfolio\", \"valuation\", \"credit\", \"inventory\", \"planner\", \"tutor\", \"marketing\", \"sales\", \"engineering\", \"content\", \"research\", \"general_ops\"]."
-        ),
-        expected_output="A strict JSON object containing 'reasoning' (string) and 'departments' (list of strings).",
-        agent=triage_agent
-    )
+    # Fast direct evaluation using resilient ChatGroq with JSON mode
+    try:
+        chat_llm = ChatGroq(
+            model_name="llama-3.3-70b-versatile",
+            groq_api_key=api_key,
+            temperature=0.2,
+            max_retries=2,
+            response_format={"type": "json_object"}
+        )
+        sys_prompt = TRIAGE_SYSTEM_PROMPT
+        if cognitive_memory:
+            sys_prompt += f"\n\n{cognitive_memory}"
+        messages = [
+            SystemMessage(content=sys_prompt),
+            HumanMessage(content=f"User Request: {user_request}")
+        ]
+        res = chat_llm.invoke(messages)
+        raw_output = str(res.content).strip()
+        parsed = json.loads(raw_output)
+    except Exception as e:
+        print(f"[Triage Direct LLM Notice]: {e}")
+        # Fallback keyword and conversational heuristics
+        lower_req = user_request.lower()
+        if any(g in lower_req for g in ["hi", "hello", "hey", "who are you", "what can you do", "help me"]) or len(user_request.split()) <= 3:
+            parsed = {
+                "action": "CLARIFY",
+                "clarification_response": (
+                    f"Hello! I am your Chief of Staff at MAK Enterprise AI Agency.\n\n"
+                    "I can coordinate tasks across our specialized units: **Live Web Search & Windows PC Ops**, **Marketing Studio**, **Sales Outreach**, **Engineering & Python Surgeon**, **Content House**, **Academic Research**, and **Corporate Finance / CFO**.\n\n"
+                    "How can we assist you today? Please feel free to provide specific details or ask a question."
+                ),
+                "reasoning": "Greeting or underspecified prompt requiring conversational clarification.",
+                "primary_department": "general_ops",
+                "collaborating_departments": []
+            }
+        elif any(k in lower_req for k in ["search", "google", "browse", "visit", "scrape", "lookup", "online", "open app", "close app", "find file", "search file", "launch app", "kill app"]):
+            parsed = {
+                "action": "ROUTE",
+                "clarification_response": "",
+                "reasoning": "User requested live web search, browsing, or Windows PC automation.",
+                "primary_department": "general_ops",
+                "collaborating_departments": []
+            }
+        else:
+            parsed = {
+                "action": "ROUTE",
+                "clarification_response": "",
+                "reasoning": "Standard agency directive.",
+                "primary_department": "cfo",
+                "collaborating_departments": []
+            }
+        raw_output = json.dumps(parsed)
 
-    crew = Crew(agents=[triage_agent], tasks=[triage_task], memory=True, embedder=EMBEDDER_CONFIG, cache=True, verbose=True)
-    res = _safe_kickoff(crew)
-    raw_output = str(res).strip()
-    return {"triage_output": raw_output}
+    action = parsed.get("action", "ROUTE").upper()
+    clarification = parsed.get("clarification_response", "")
+    reasoning = parsed.get("reasoning", "")
+    primary_dept = parsed.get("primary_department", "").strip().lower()
+    collab_depts = parsed.get("collaborating_departments", [])
 
+    print(f"\n[Chief of Staff Triage Decision]: Action={action} | Primary Dept='{primary_dept}' | Reasoning='{reasoning}'\n")
+
+    if action == "CLARIFY" and clarification:
+        return {
+            "triage_output": raw_output,
+            "triage_action": "CLARIFY",
+            "selected_departments": [],
+            "collaborating_departments": [],
+            "final_response": clarification,
+            "last_active_department": "Chief of Staff"
+        }
+
+    selected = [primary_dept] if primary_dept in ALL_DEPARTMENTS else ["general_ops"]
+    # Only include collaborating departments for corporate finance analytical suites or when explicitly valid
+    CORP_NODES_SET = set(["corp_finance", "risk", "treasury", "capital_structure", "m_and_a", "controller", "portfolio", "valuation", "credit", "inventory", "planner"])
+    if primary_dept in CORP_NODES_SET:
+        for d in collab_depts:
+            d_clean = str(d).strip().lower()
+            if d_clean in CORP_NODES_SET and d_clean not in selected:
+                selected.append(d_clean)
+
+    return {
+        "triage_output": raw_output,
+        "triage_action": "ROUTE",
+        "selected_departments": selected,
+        "collaborating_departments": [d for d in selected if d != primary_dept],
+        "last_active_department": primary_dept
+    }
 
 def node_tutor(state: AgencyState) -> dict:
     """Finance Tutor Node: Explains complex financial concepts step-by-step for educational requests."""
@@ -615,48 +662,44 @@ node_research = research_node
 
 def general_ops_node(state: AgencyState) -> dict:
     """
-    General Operations Node: Executes generic web browsing and online chores via LangGraph ToolNode execution loop.
-    Uses standard automatic tool routing (tool_choice='auto') to prevent infinite loops.
+    General Operations Node: Executes generic web browsing, online chores, and native Windows PC Control operations.
+    Equipped with browser_tool, search_tool, run_application, close_application, and search_local_file.
     """
     user_request = state.get("user_request", "")
     feedback = state.get("inspector_feedback", "")
     feedback_prompt = f"\n\n[INSPECTOR GENERAL FEEDBACK TO ADDRESS IN REWRITE]:\n{feedback}" if feedback else ""
 
-    # Step 3: Dead simple stripped system prompt
-    web_driver_prompt = (
-        "You are a web driver. You have no internal knowledge. "
-        "You must execute the browser_tool or search_tool to satisfy the user's prompt and return ONLY the exact data you scrape."
+    ops_system_prompt = (
+        "You are an executive General Operations & Windows PC Controller agent.\n"
+        "You have access to tools for live internet searching, browser navigation, opening desktop applications, closing processes, and searching local files on the Windows host machine.\n"
+        "Analyze the user's directive and invoke the appropriate tool:\n"
+        "- run_application: To launch desktop software or Windows system apps (e.g., notepad, calc, code).\n"
+        "- close_application: To terminate running software by process name (e.g., notepad.exe, spotify.exe).\n"
+        "- search_local_file: To search for specific files on disk.\n"
+        "- search_tool / browser_tool: For live internet searching and web page navigation.\n"
+        "Execute the necessary tool to satisfy the prompt and return a clear, structured summary of the action taken."
     )
 
     # Initialize messages conversation history
     messages = list(state.get("messages") or [])
     if not messages:
         messages = [
-            SystemMessage(content=web_driver_prompt),
+            SystemMessage(content=ops_system_prompt),
             HumanMessage(content=f"{user_request}{feedback_prompt}")
         ]
 
-    # If the last message was a ToolMessage from ToolNode, return the final deliverable without looping
-    last_msg = messages[-1]
-    if isinstance(last_msg, ToolMessage):
-        final_text = str(last_msg.content)
-        ai_resp = AIMessage(content=final_text)
-        return {
-            "messages": [ai_resp],
-            "final_response": final_text,
-            "raw_department_reports": {"general_ops": final_text},
-            "last_active_department": "general_ops"
-        }
+    # Map available tools
+    available_tools = [browser_tool, search_tool] + pc_tools
+    tool_map = {t.name: t for t in available_tools}
 
-    # Step 2 & 3: Standard automatic tool binding without hardcoded tool_choice constraint
-    api_key = os.getenv("GROQ_API_KEY")
+    api_key = vault.get_active_key("groq") or os.getenv("GROQ_API_KEY")
     chat_llm = ChatGroq(model_name="llama-3.3-70b-versatile", groq_api_key=api_key, max_retries=2)
-    chat_with_tools = chat_llm.bind_tools([browser_tool, search_tool])
+    chat_with_tools = chat_llm.bind_tools(available_tools)
 
     try:
         response = chat_with_tools.invoke(messages)
     except Exception as e:
-        # Fallback parser for Groq tool-call format
+        # Fallback parser for Groq tool-call format or heuristic matching
         err_str = str(e)
         tool_call_match = re.search(r'<function=(\w+)[>:]?\s*({.*?})', err_str)
         if tool_call_match:
@@ -674,22 +717,65 @@ def general_ops_node(state: AgencyState) -> dict:
                 }]
             )
         else:
-            if "http" in user_request or "www." in user_request:
-                url_m = re.findall(r'https?://[^\s<>"]+|www\.[^\s<>"]+', user_request)
-                t_url = url_m[0] if url_m else "https://www.google.com"
-                if not t_url.startswith("http"):
-                    t_url = "https://" + t_url
-                response = AIMessage(
-                    content="",
-                    tool_calls=[{"name": "browser_tool", "args": {"url": t_url}, "id": f"call_{int(time.time()*1000)}"}]
-                )
-            else:
-                response = AIMessage(
-                    content="",
-                    tool_calls=[{"name": "search_tool", "args": {"query": user_request}, "id": f"call_{int(time.time()*1000)}"}]
-                )
+            response = AIMessage(content="", tool_calls=[])
 
-    content_str = response.content if isinstance(response.content, str) else str(response.content)
+    # Check for direct heuristic tool routing if LLM didn't emit a tool call
+    lower_req = user_request.lower()
+    tool_calls_to_run = getattr(response, "tool_calls", None) or []
+
+    if not tool_calls_to_run:
+        if any(k in lower_req for k in ["open app", "launch app", "open notepad", "open calc", "launch notepad", "start notepad", "open application", "run notepad", "run app"]):
+            app_target = re.sub(r'^(please\s+)?(open|launch|run|start)\s+(the\s+)?(app\s+|application\s+)?', '', lower_req).strip()
+            tool_calls_to_run = [{"name": "run_application", "args": {"app_name": app_target or "notepad"}, "id": "direct_1"}]
+        elif any(k in lower_req for k in ["close app", "kill app", "close notepad", "terminate", "kill notepad", "close application"]):
+            app_target = re.sub(r'^(please\s+)?(close|kill|terminate|stop)\s+(the\s+)?(app\s+|application\s+)?', '', lower_req).strip()
+            if not app_target.endswith(".exe"):
+                app_target += ".exe"
+            tool_calls_to_run = [{"name": "close_application", "args": {"app_name": app_target or "notepad.exe"}, "id": "direct_2"}]
+        elif any(k in lower_req for k in ["search file", "find file", "locate file", "search for file", "find the file"]):
+            file_target = re.sub(r'^(please\s+)?(search\s+for\s+file|search\s+file|find\s+file|locate\s+file|find\s+the\s+file)\s+', '', lower_req).strip()
+            # Extract directory if specified
+            search_dir = "." if ("current directory" in lower_req or "this directory" in lower_req) else "C:\\Users\\Objects\\Documents"
+            clean_file = file_target.replace("in the current directory", "").replace("in this directory", "").strip()
+            tool_calls_to_run = [{"name": "search_local_file", "args": {"file_name": clean_file or "requirements.txt", "search_directory": search_dir}, "id": "direct_3"}]
+        elif "http" in user_request or "www." in user_request:
+            url_m = re.findall(r'https?://[^\s<>"]+|www\.[^\s<>"]+', user_request)
+            t_url = url_m[0] if url_m else "https://www.google.com"
+            if not t_url.startswith("http"):
+                t_url = "https://" + t_url
+            tool_calls_to_run = [{"name": "browser_tool", "args": {"url": t_url}, "id": "direct_4"}]
+
+    # Execute tool calls if present
+    if tool_calls_to_run:
+        results = []
+        for call in tool_calls_to_run:
+            t_name = call.get("name")
+            t_args = call.get("args") or {}
+            target_tool = tool_map.get(t_name)
+            if target_tool:
+                try:
+                    tool_res = target_tool.invoke(t_args)
+                    results.append(str(tool_res))
+                except Exception as t_err:
+                    results.append(f"Error executing {t_name}: {t_err}")
+            else:
+                results.append(f"Tool {t_name} is not recognized.")
+        raw_tool_output = "\n\n".join(results)
+        
+        # Structure deliverable cleanly for Inspector General QA and user UI
+        if any(c.get("name") in ["run_application", "close_application", "search_local_file"] for c in tool_calls_to_run):
+            content_str = (
+                f"### Action & Findings\n"
+                f"{raw_tool_output}\n\n"
+                f"### System Status\n"
+                f"* **Task Target**: `{user_request}`\n"
+                f"* **Execution Mode**: Native Windows OS Process / File Subsystem\n"
+                f"* **Operation**: Successfully executed."
+            )
+        else:
+            content_str = raw_tool_output
+    else:
+        content_str = response.content if isinstance(response.content, str) else str(response.content)
 
     return {
         "messages": [response],
@@ -1022,12 +1108,26 @@ def inspector_node(state: AgencyState) -> dict:
     new_retry_count = retry_count + 1 if status == "FAIL" else retry_count
 
     print(f"\n[Inspector General QA Audit]: Status={status}, Retries={new_retry_count}/2, Feedback='{feedback}'\n")
-
     return {
         "inspector_decision": {"status": status, "feedback": feedback},
         "inspector_feedback": feedback if status == "FAIL" else "",
         "retry_count": new_retry_count
     }
+
+
+def node_corp_finance(state: AgencyState) -> dict:
+    llm = get_resilient_llm()
+    dept = FinanceDepartment(llm)
+    analyst = dept.create_corp_finance_analyst()
+
+    task = Task(
+        description=f"Evaluate capital investment viability, projected cash flows, Net Present Value (NPV), Internal Rate of Return (IRR), and hurdle rate for: '{state['user_request']}'.",
+        expected_output="Detailed corporate finance valuation report with DCF, NPV, IRR, and payback horizons.",
+        agent=analyst
+    )
+    crew = Crew(agents=[analyst], tasks=[task], memory=True, embedder=EMBEDDER_CONFIG, cache=True, verbose=True)
+    res = _safe_kickoff(crew)
+    return {"raw_department_reports": {"corp_finance": str(res)}, "last_active_department": "corp_finance"}
 
 
 # =====================================================================
@@ -1040,88 +1140,28 @@ ALL_DEPARTMENTS = [
 
 def route_from_triage(state: AgencyState) -> list[str]:
     """
-    Parses the validated RoutingDecision output from Chief of Staff to extract selected departments.
-    CrewAI handles Pydantic validation, so output is a validated RoutingDecision object or JSON string.
+    Parses validated Chief of Staff Triage decision:
+    - If action is 'CLARIFY', routes directly to END without firing department crews.
+    - If action is 'ROUTE', routes to the primary and collaborating departments.
     """
-    user_req = state.get("user_request", "").strip().lower()
-    text = state.get("triage_output", "").strip()
+    triage_action = state.get("triage_action", "ROUTE").upper()
+    if triage_action == "CLARIFY":
+        print("\n[Route From Triage] Triage Action is CLARIFY. Returning directly to user with consultative questions.\n")
+        return [END]
 
-    # Direct fast-track for explicit generic web/search tasks
-    if any(k in user_req for k in ["go to", "visit", "browse", "scrape", "search the web", "search for", "google"]) and not any(k in user_req for k in ["wacc", "dcf", "valuation", "balance sheet", "income statement", "capital structure", "m&a", "merger", "ebitda"]):
-        if "general_ops" in ALL_DEPARTMENTS:
-            print(f"\n[Route From Triage Direct Match] Generic web/search request detected: ['general_ops']\n")
+    selected_depts = state.get("selected_departments", [])
+    if not selected_depts:
+        user_req = state.get("user_request", "").strip().lower()
+        if any(k in user_req for k in ["search", "browse", "google", "website", "online", "scrape"]):
             return ["general_ops"]
+        return ["cfo"]
 
-    try:
-        # 1. Clean and isolate JSON payload
-        clean_text = text
-        if "```json" in clean_text:
-            clean_text = clean_text.split("```json")[1].split("```")[0].strip()
-        elif "```" in clean_text:
-            clean_text = clean_text.split("```")[1].split("```")[0].strip()
-        elif "{" in clean_text and "}" in clean_text:
-            clean_text = clean_text[clean_text.find("{"):clean_text.rfind("}") + 1].strip()
-
-        parsed = json.loads(clean_text)
-        if isinstance(parsed, dict):
-            reasoning = parsed.get("reasoning", "")
-            if reasoning:
-                print(f"\n[Chief of Staff Triage Reasoning]: {reasoning}\n")
-            depts = parsed.get("departments", [])
-        elif isinstance(parsed, list):
-            depts = parsed
-        else:
-            depts = []
-
-        valid_depts = [d for d in depts if isinstance(d, str) and d in ALL_DEPARTMENTS]
-        if valid_depts:
-            if "general_ops" in valid_depts:
-                print(f"\n[Route From Triage] General Operations / Web Chore request detected: ['general_ops']\n")
-                return ["general_ops"]
-            if "research" in valid_depts:
-                print(f"\n[Route From Triage] Academic Research request detected: ['research']\n")
-                return ["research"]
-            if "content" in valid_depts:
-                print(f"\n[Route From Triage] Content House request detected: ['content']\n")
-                return ["content"]
-            if "engineering" in valid_depts:
-                print(f"\n[Route From Triage] Engineering request detected: ['engineering']\n")
-                return ["engineering"]
-            if "tutor" in valid_depts:
-                print(f"\n[Route From Triage] Educational request detected: ['tutor']\n")
-                return ["tutor"]
-            if "sales" in valid_depts:
-                print(f"\n[Route From Triage] Sales request detected: ['sales']\n")
-                return ["sales"]
-            if "marketing" in valid_depts:
-                print(f"\n[Route From Triage] Marketing request detected: ['marketing']\n")
-                return ["marketing"]
-            print(f"\n[Route From Triage] Selected departments: {valid_depts}\n")
-            return valid_depts
-
-    except Exception as e:
-        print(f"\n[Triage Routing Notice] Exception parsing RoutingDecision JSON: '{text}'. Error: {e}\n")
-
-    # Fallback keyword detection if LLM did not format as JSON
-    lower_text = text.lower()
-    if "general_ops" in lower_text:
-        print(f"\n[Route From Triage Fallback] Detected 'general_ops' in triage output.\n")
+    valid_depts = [d for d in selected_depts if d in ALL_DEPARTMENTS]
+    if not valid_depts:
         return ["general_ops"]
-    if "research" in lower_text:
-        return ["research"]
-    if "content" in lower_text:
-        return ["content"]
-    if "engineering" in lower_text:
-        return ["engineering"]
-    if "tutor" in lower_text:
-        return ["tutor"]
-    if "sales" in lower_text:
-        return ["sales"]
-    if "marketing" in lower_text:
-        return ["marketing"]
 
-    print(f"\n[Triage Routing Warning] Could not extract valid departments from output. Defaulting to ['cfo'].\n")
-    return ["cfo"]
+    print(f"\n[Route From Triage] Mobilizing Departments: {valid_depts}\n")
+    return valid_depts
 
 
 def route_from_inspector(state: AgencyState) -> str:
@@ -1197,6 +1237,8 @@ workflow.add_edge(START, "triage")
 
 # Dynamic Conditional Edges from Triage (Explicit Dict Mapping)
 TRIAGE_ROUTING_MAP = {d: d for d in ALL_DEPARTMENTS}
+TRIAGE_ROUTING_MAP[END] = END
+TRIAGE_ROUTING_MAP["__end__"] = END
 workflow.add_conditional_edges("triage", route_from_triage, TRIAGE_ROUTING_MAP)
 
 # 1. Educational Path: tutor routes to inspector
@@ -1217,9 +1259,8 @@ workflow.add_edge("content", "inspector")
 # 6. Academic Research Path: research agent routes to inspector
 workflow.add_edge("research", "inspector")
 
-# Step 5: General Operations ToolNode Loop (conditional edge checks tool_calls, tools routes back)
-workflow.add_conditional_edges("general_ops", tools_condition, {"tools": "tools", "__end__": "inspector"})
-workflow.add_edge("tools", "general_ops")
+# 7. General Operations Path: general_ops routes to inspector
+workflow.add_edge("general_ops", "inspector")
 
 # 8. Direct CFO Path: cfo routes to inspector
 workflow.add_edge("cfo", "inspector")
@@ -1248,9 +1289,10 @@ app_graph = workflow.compile()
 # =====================================================================
 # 4. Main Entry Point for Streamlit & Standalone Execution
 # =====================================================================
-def run_agency(user_request: str) -> str:
+def run_agency(user_request: str, session_id: str = "default") -> str:
     """
     Invokes the Chief of Staff Triage, Dynamic Parallel Execution, and Inspector General QA workflow.
+    - Uses CognitiveMemoryEngine to inject user profile & conversational memory.
     - Educational queries route: triage -> tutor -> inspector -> END.
     - Marketing queries route: triage -> marketing mini-crew -> inspector -> END.
     - Sales queries route: triage -> sales mini-crew -> inspector -> END.
@@ -1260,10 +1302,15 @@ def run_agency(user_request: str) -> str:
     - General Operations queries route: triage -> executive assistant -> inspector -> END.
     - Corporate queries route: triage -> parallel depts -> summarizer -> CFO -> inspector -> END.
     """
+    cognitive_memory = memory.get_cognitive_context(session_id=session_id)
     initial_state = {
         "user_request": user_request,
+        "session_id": session_id,
+        "cognitive_memory": cognitive_memory,
         "triage_output": "",
+        "triage_action": "",
         "selected_departments": [],
+        "collaborating_departments": [],
         "raw_department_reports": {},
         "department_summaries": {},
         "final_response": "",
@@ -1276,7 +1323,21 @@ def run_agency(user_request: str) -> str:
     }
 
     final_state = app_graph.invoke(initial_state)
-    return final_state.get("final_response") or final_state.get("final_cfo_decision", "")
+    result = final_state.get("final_response") or final_state.get("final_cfo_decision", "")
+    dept = final_state.get("last_active_department") or "general_ops"
+
+    # Persist turn into SQLite memory database and update user cognitive impression
+    try:
+        memory.record_turn(
+            session_id=session_id,
+            user_prompt=user_request,
+            agent_response=result,
+            department_used=dept
+        )
+    except Exception as e:
+        print(f"[Memory Record Notice]: {e}")
+
+    return result
 
 
 if __name__ == "__main__":

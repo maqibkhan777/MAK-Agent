@@ -85,11 +85,11 @@ def arxiv_academic_scraper(query: str) -> str:
             url = paper.entry_id if hasattr(paper, "entry_id") else (paper.pdf_url if hasattr(paper, "pdf_url") else "N/A")
 
             papers_output.append(
-                f"=== Paper {i}: {title} ===\n"
-                f"• Authors: {authors}\n"
-                f"• Published Date: {pub_date}\n"
-                f"• Paper URL: {url}\n"
-                f"• Abstract / Summary:\n{summary}"
+                f"### Paper {i}: [{title}]({url})\n"
+                f"* **Authors**: {authors}\n"
+                f"* **Published**: {pub_date}\n"
+                f"* **Direct Paper Link**: [{title}]({url})\n"
+                f"* **Key Findings / Abstract**:\n{summary}"
             )
 
         return f"Top ArXiv Peer-Reviewed Scientific Papers for '{clean_query}':\n\n" + "\n\n".join(papers_output)

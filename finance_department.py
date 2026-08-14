@@ -37,8 +37,10 @@ from crewai import Agent, LLM
 from crewai.tools import tool
 from custom_tools import live_web_search
 
+from key_vault import vault
+
 # Centrally sanitize prompt-caching headers and native tool definitions incompatible with Groq API
-# Includes automatic retry & exponential backoff on RateLimitError (429) across all agents
+# Includes automatic Multi-Key Failover rotation on RateLimitError (429) across all agents
 if not getattr(litellm, "_groq_patched", False):
     _original_completion = litellm.completion
     def _groq_safe_completion(*args, **kwargs):
@@ -64,15 +66,23 @@ if not getattr(litellm, "_groq_patched", False):
                     except Exception:
                         pass
         
-        max_retries = 3
+        max_retries = 4
         for attempt in range(max_retries):
+            # Always ensure current active key is used
+            current_key = vault.get_active_key("groq")
+            if current_key and ("groq" in str(kwargs.get("model", "")).lower() or "groq" in str(args)):
+                kwargs["api_key"] = current_key
+
             try:
                 return _original_completion(*args, **kwargs)
             except Exception as e:
                 err_str = str(e).lower()
-                if "ratelimiterror" in err_str or "429" in err_str or "rate limit" in err_str:
+                if "ratelimiterror" in err_str or "429" in err_str or "rate limit" in err_str or "tokens per minute" in err_str:
                     if attempt < max_retries - 1:
-                        backoff_delay = (2 ** attempt) * 2
+                        # Rotate to next healthy key in the vault pool
+                        new_key = vault.rotate_key("groq", failed_key=current_key, reason="429 RateLimit/TPM Exceeded")
+                        kwargs["api_key"] = new_key
+                        backoff_delay = (2 ** attempt) * 1.5
                         time.sleep(backoff_delay)
                         continue
                 raise e

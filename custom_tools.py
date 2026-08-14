@@ -28,7 +28,10 @@ except Exception:
     pass
 
 from crewai.tools import tool
-from duckduckgo_search import DDGS
+try:
+    from ddgs import DDGS
+except ImportError:
+    from duckduckgo_search import DDGS
 
 import io
 try:
@@ -109,36 +112,92 @@ def generate_free_image(prompt: str, filename: str) -> str:
 @tool("Live Internet Search")
 def live_web_search(query: str) -> str:
     """Use this tool to search the live internet for the absolute latest, up-to-date information, news, pricing, or documentation."""
+    import re
+    # Clean leading conversational or command prefixes
+    clean_query = query.strip()
+    clean_query = re.sub(r'^(please\s+)?(search\s+the\s+web\s+for|search\s+for|search\s+online\s+for|search\s+the\s+internet\s+for|search|google\s+for|google|look\s+up|find\s+information\s+on|find)\s+', '', clean_query, flags=re.IGNORECASE).strip()
+    if not clean_query:
+        clean_query = query.strip()
+
     try:
-        results = DDGS().text(query, max_results=5)
+        results = DDGS().text(clean_query, max_results=5)
         if not results:
-            return f"No results found for query: '{query}'"
+            # Fallback with raw query
+            results = DDGS().text(query, max_results=5)
+        if not results:
+            return f"No results found for query: '{clean_query}'"
         formatted = []
         for i, r in enumerate(results, 1):
             formatted.append(f"{i}. Title: {r.get('title', '')}\n   Snippet: {r.get('body', '')}\n   URL: {r.get('href', '')}")
         return "\n\n".join(formatted)
     except Exception as e:
-        return f"Error executing live web search for '{query}': {e}"
+        return f"Error executing live web search for '{clean_query}': {e}"
 
-def connect_to_live_browser():
+def is_port_open(host: str = "127.0.0.1", port: int = 9222, timeout: float = 0.4) -> bool:
+    """Fast socket probe to verify if Chrome DevTools Protocol debugging port is listening."""
+    import socket
+    try:
+        with socket.create_connection((host, port), timeout=timeout):
+            return True
+    except (socket.timeout, ConnectionRefusedError, OSError):
+        return False
+
+
+def connect_to_live_browser(port: int = 9222):
+    """
+    Connects directly to the user's running Chrome/Edge browser session via CDP (port 9222).
+    Accesses user session cookies, logged-in states, and browser tabs without spawning blank chromium.
+    """
+    debug_port = int(os.getenv("CHROME_DEBUG_PORT", str(port)))
+    if not is_port_open(port=debug_port):
+        return f"PORT_CLOSED: Chrome remote debugging port {debug_port} is not listening."
+
     from playwright.sync_api import sync_playwright
     playwright = sync_playwright().start()
-    # Connect to the live Chrome instance listening on port 9222
     try:
-        browser = playwright.chromium.connect_over_cdp("http://localhost:9222")
-        # Grab the first open tab (default context)
-        context = browser.contexts[0]
-        page = context.pages[0] if context.pages else context.new_page()
-        return page, browser, playwright
+        browser = playwright.chromium.connect_over_cdp(f"http://localhost:{debug_port}", timeout=4000)
+        # Use existing open tab or open a tab in the user's active session context
+        if browser.contexts:
+            context = browser.contexts[0]
+            page = context.pages[0] if context.pages else context.new_page()
+        else:
+            context = browser.new_context()
+            page = context.new_page()
+        return page, browser, playwright, True
     except Exception as e:
-        return f"CRITICAL ERROR: Could not connect to browser. Ensure Chrome is running with --remote-debugging-port=9222. Error: {e}"
+        try:
+            playwright.stop()
+        except Exception:
+            pass
+        return f"CDP_ERROR: Could not attach to live Chrome on port {debug_port}: {e}"
+
 
 @tool("Dynamic Browser Tool")
 def dynamic_browser_tool(url: str) -> str:
-    """Use this tool to navigate a live Chrome browser session via CDP (port 9222) to a URL that requires JavaScript to load. It returns the visible text of the fully loaded page."""
-    browser_conn = connect_to_live_browser()
-    if isinstance(browser_conn, str):
-        # Fallback to isolated chromium if live CDP instance is unavailable
+    """Use this tool to navigate the user's live Chrome browser session via CDP (port 9222) to a URL that requires JavaScript to load. It returns the visible text of the fully loaded page."""
+    conn = connect_to_live_browser()
+    
+    if isinstance(conn, tuple):
+        page, browser, playwright, is_live = conn
+        try:
+            print(f"[MAK Browser Tool] 🌐 Connected directly to User's Local Chrome via Port 9222: {url}")
+            page.goto(url, wait_until="domcontentloaded", timeout=25000)
+            page.wait_for_timeout(800)
+            text = page.inner_text("body")
+            if len(text) > 15000:
+                text = text[:15000] + "\n\n[...Content truncated for LLM context optimization...]"
+            return f"=== Live Local Browser Navigation (Port 9222: Connected) ===\nURL: {url}\n\n{text}"
+        except Exception as e:
+            return f"Error during live browser navigation to {url}: {e}"
+        finally:
+            try:
+                browser.close()
+                playwright.stop()
+            except Exception:
+                pass
+    else:
+        # Fallback to isolated headless engine if user's Chrome port 9222 is not actively listening
+        print(f"[MAK Browser Tool] Live port 9222 not open. Launching fast headless fallback engine for: {url}")
         try:
             from playwright.sync_api import sync_playwright
             with sync_playwright() as p:
@@ -146,30 +205,16 @@ def dynamic_browser_tool(url: str) -> str:
                 page = browser.new_page()
                 try:
                     page.goto(url, wait_until="domcontentloaded", timeout=20000)
+                    page.wait_for_timeout(600)
                 except Exception:
                     pass
                 text = page.inner_text("body")
                 browser.close()
                 if len(text) > 15000:
                     text = text[:15000] + "\n\n[...Content truncated for LLM context optimization...]"
-                return text
+                return f"=== Web Navigation (Headless Fallback Engine) ===\nURL: {url}\n\n{text}"
         except Exception as e:
-            return f"{browser_conn}\nFallback navigation error: {e}"
-
-    page, browser, playwright = browser_conn
-    try:
-        try:
-            page.goto(url, wait_until="domcontentloaded", timeout=20000)
-        except Exception:
-            pass
-        text = page.inner_text("body")
-        if len(text) > 15000:
-            text = text[:15000] + "\n\n[...Content truncated for LLM context optimization...]"
-        return text
-    except Exception as e:
-        return f"Error executing dynamic browser navigation for {url} via live CDP: {e}"
-    finally:
-        playwright.stop()
+            return f"Browser navigation error for {url}: {e}"
 
 @tool("Post to Social API")
 def post_to_social_api(platform: str, content: str) -> str:

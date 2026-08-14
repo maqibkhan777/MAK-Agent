@@ -35,8 +35,8 @@ COPY . .
 # Ensure persistent directories exist
 RUN mkdir -p output temp_uploads company_knowledge_base
 
-# Expose ports for Streamlit Command Center (8501) and Arize Phoenix Observability (6060)
-EXPOSE 8501 6060
+# Expose ports for FastAPI Server (8000) and Arize Phoenix Observability (6060)
+EXPOSE 8000 6060
 
-# Default command: launch the Streamlit dashboard
-CMD ["streamlit", "run", "app.py", "--server.port=8501", "--server.address=0.0.0.0"]
+# Default command: launch the FastAPI server
+CMD ["uvicorn", "server:app", "--host", "0.0.0.0", "--port", "8000"]

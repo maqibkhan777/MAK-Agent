@@ -28,8 +28,11 @@ except Exception:
 
 import requests
 from bs4 import BeautifulSoup
-from duckduckgo_search import DDGS
 from pydantic import BaseModel, Field, field_validator
+try:
+    from ddgs import DDGS
+except ImportError:
+    from duckduckgo_search import DDGS
 from crewai import Agent, LLM
 from crewai.tools import tool
 from crewai_tools import DirectoryReadTool
