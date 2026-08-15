@@ -208,6 +208,10 @@ class KeyVault:
                 }
             return summary
 
+    def get_vault_status(self) -> Dict[str, Any]:
+        """Alias for get_status."""
+        return self.get_status()
+
     @staticmethod
     def _mask_key(key: str) -> str:
         if not key:

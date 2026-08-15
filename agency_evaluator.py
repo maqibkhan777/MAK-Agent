@@ -31,7 +31,7 @@ except Exception:
 
 from crewai import Agent, Task, Crew
 from finance_department import get_resilient_llm
-from main import app_graph
+from main import run_agency
 
 
 # =====================================================================
@@ -194,24 +194,9 @@ def run_evaluation_suite() -> Dict[str, Any]:
         print(f"   Expected: {test.get('expected_behavior', '')[:80]}...")
 
         start_time = time.time()
-        initial_state = {
-            "user_request": test["prompt"],
-            "triage_output": "",
-            "selected_departments": [],
-            "raw_department_reports": {},
-            "department_summaries": {},
-            "final_response": "",
-            "final_cfo_decision": "",
-            "retry_count": 0,
-            "inspector_feedback": "",
-            "last_active_department": "",
-            "inspector_decision": {}
-        }
-
         try:
             # 1. Execute via LangGraph Master Orchestrator
-            final_state = app_graph.invoke(initial_state)
-            deliverable = final_state.get("final_response") or final_state.get("final_cfo_decision", "")
+            deliverable = run_agency(test["prompt"], session_id=f"eval-{dept.lower()}-{i}")
             duration = round(time.time() - start_time, 2)
 
             # 2. Pass output to LLM Judge for evaluation

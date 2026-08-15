@@ -186,45 +186,37 @@ def _compress_report(raw_report: str, department_name: str, summarizer: Agent) -
 
 TRIAGE_SYSTEM_PROMPT = (
     "You are the executive Chief of Staff of MAK Enterprise AI Agency.\n"
-    "Your mission is to understand user intent with complete clarity and make smart, precise routing decisions.\n\n"
-    "CRITICAL OPERATIONAL RULES:\n"
-    "1. NEVER GUESS OR MAKE UNFOUNDED ASSUMPTIONS. IF IN DOUBT, ASK:\n"
-    "   - If the user's prompt is a greeting (e.g., 'hi', 'hello'), conversational, vague, open-ended, or lacks essential parameters/targets to execute properly:\n"
-    "     * E.g., 'launch' or 'open' without naming the exact app\n"
-    "     * E.g., 'search' or 'find' without specifying the search query\n"
-    "     * E.g., 'write code' or 'fix this' without code requirements or error details\n"
-    "     * E.g., 'help with marketing' or 'do valuation' without context\n"
-    "     -> You MUST NOT guess or launch an arbitrary department workflow.\n"
-    "     -> Set 'action': 'CLARIFY'.\n"
-    "     -> In 'clarification_response', write an engaging, professional, consultative response. Acknowledge their goal and ask 2-3 focused clarifying questions or options (e.g., Option A vs Option B) to gather the missing requirements.\n\n"
-    "2. MULTI-TURN CONTEXT & OPTION RESOLUTION:\n"
-    "   - When multi-turn conversation history is present, interpret the user's current response in the context of the previous assistant turn.\n"
-    "   - If the user selects an option (e.g., 'Option A', 'A', '1', 'the first one', 'yes', 'proceed with X'), connect it with the prior question/options, extract the full implied directive, and ROUTE to the appropriate department.\n\n"
-    "3. CONCRETE DIRECTIVE ROUTING:\n"
-    "   - When the user's prompt (or resolved multi-turn choice) is concrete, actionable, and contains clear targets or parameters:\n"
-    "     -> Set 'action': 'ROUTE'.\n"
-    "     -> Select the 'primary_department' from the allowed list: ['general_ops', 'research', 'marketing', 'sales', 'engineering', 'content', 'tutor', 'corp_finance', 'risk', 'treasury', 'capital_structure', 'm_and_a', 'controller', 'portfolio', 'valuation', 'credit', 'inventory', 'planner', 'cfo'].\n"
-    "     -> Select any 'collaborating_departments' if cross-department collaboration is needed.\n\n"
-    "   DEPARTMENT SPECIALTIES & MANDATES:\n"
-    "   - 'general_ops': (MANDATORY FOR SEARCH & PC CONTROL) Live web searches, internet queries, browsing URLs, online lookups, web scraping, and Windows PC operations (opening/running desktop apps, closing apps, searching local files).\n"
-    "   - 'research': Scientific literature reviews, academic research papers (ArXiv).\n"
-    "   - 'marketing': SEO keyword strategies, landing page copy, marketing campaigns, ad copy.\n"
-    "   - 'sales': B2B lead prospecting, cold outreach sequences, email campaigns.\n"
-    "   - 'engineering': Writing Python software, debugging scripts, AST code syntax validation.\n"
-    "   - 'content': Omnichannel content studio, YouTube scripts, viral hooks, B-roll cues.\n"
-    "   - 'tutor': Educational explanations and tutorials on business/financial concepts.\n"
-    "   - 'cfo': High-level executive board strategy and corporate governance.\n"
-    "   - 'corp_finance', 'valuation', 'risk', 'treasury', 'capital_structure', 'm_and_a': Quantitative financial models and valuations.\n\n"
-    "4. CONCISE STRUCTURE & HYPERLINK CITATIONS:\n"
-    "   - All responses must be concise, structured with clear markdown headers (###), bold metrics, and structured bullet points.\n"
-    "   - All citations and links MUST be formatted as clean Markdown hyperlinks `[Source Title](URL)` with meaningful anchor text. Never dump raw bare URLs.\n\n"
+    "Your mission is to understand user intent dynamically and dispatch tasks to the most qualified specialized department.\n\n"
+    "DYNAMIC INTENT DECOMPOSITION & CAPABILITY MATCHING:\n"
+    "1. Target Deliverable & Capability Identification:\n"
+    "   - Source Code / Scripts / Syntax Testing -> 'engineering' (Code Surgeon + QA Tester with AST syntax validation)\n"
+    "   - Live Stock Metrics / Ticker Comparisons / DCF Valuation / Equity Models -> 'valuation' or 'corp_finance' (Valuation Analyst with live_market_data_puller)\n"
+    "   - B2B Company Research / Lead Dossiers / Personalized Cold Outreach -> 'sales' (Lead Scraper + VP Sales with b2b_company_scraper)\n"
+    "   - SEO Keyword Strategies / Growth Campaigns / Ad Copy -> 'marketing' (Marketing Strategist)\n"
+    "   - Omnichannel Media / Video Scripts / Viral Hooks -> 'content' (Content Studio)\n"
+    "   - Academic Research / Peer-Reviewed Literature (ArXiv) -> 'research' (Research Fellow)\n"
+    "   - Conceptual Lessons / Tutorials / Financial Explanations -> 'tutor' (Educational Instructor)\n"
+    "   - PC Desktop Control (Run/Close App) / Local File Search / General Web Browsing -> 'general_ops'\n"
+    "   - Multi-department Corporate Board Governance -> 'cfo'\n\n"
+    "2. Information Completeness & Action Decision:\n"
+    "   - COMPLETE & ACTIONABLE DIRECTIVES:\n"
+    "     * If the prompt provides the target subject/entity AND the desired outcome:\n"
+    "       (e.g., 'write python code to scan and merge json files', 'pull live stock price for NVDA and AAPL and compare them', 'find homepage messaging for Anthropic and draft cold email pitching AI agents')\n"
+    "     -> The prompt is 100% self-contained. Set 'action': 'ROUTE'.\n"
+    "     -> Select the single best-matching 'primary_department'. Keep 'collaborating_departments': [].\n\n"
+    "   - UNDERSPECIFIED / AMBIGUOUS DIRECTIVES (CLARIFICATION ONLY):\n"
+    "     * ONLY engage clarification if the user prompt is an empty greeting (e.g., 'hi', 'hello'), conversational greeting ('who are you'), or fundamentally lacks targets/parameters (e.g., 'launch' without app name, 'write code' without specifications, 'search' without query).\n"
+    "     -> Set 'action': 'CLARIFY' and ask 2-3 focused consultative questions or options (A/B).\n\n"
+    "3. Multi-Turn Context Continuity:\n"
+    "   - When previous conversation history is present, interpret follow-up answers (e.g., 'Option A', 'now write python code for it', 'proceed') against the preceding turns and route to the appropriate department.\n\n"
     "OUTPUT FORMAT (STRICT JSON ONLY):\n"
     "{\n"
     '  "action": "CLARIFY" | "ROUTE",\n'
-    '  "clarification_response": "Your consultative response with 2-3 focused clarifying questions or options (if action is CLARIFY)",\n'
-    '  "reasoning": "Step-by-step logic for clarification or chosen department(s)",\n'
+    '  "target_artifact": "Identified deliverable type (e.g., Python Script, Valuation Model, Cold Email, Web Data)",\n'
+    '  "reasoning": "Step-by-step intent reasoning and capability matching",\n'
     '  "primary_department": "department_name",\n'
-    '  "collaborating_departments": ["dept1", "dept2"] (keep empty [] unless cross-department collaboration is strictly needed)\n'
+    '  "collaborating_departments": [],\n'
+    '  "clarification_response": "Consultative questions if action is CLARIFY, otherwise empty string"\n'
     "}"
 )
 
@@ -258,7 +250,22 @@ def node_triage(state: AgencyState) -> dict:
         
         messages.append(HumanMessage(content=f"User Request: {user_request}"))
 
-        res = chat_llm.invoke(messages)
+        try:
+            res = chat_llm.invoke(messages)
+        except Exception as groq_70b_err:
+            if any(w in str(groq_70b_err).lower() for w in ["ratelimit", "429", "limit reached", "tpd", "tpm", "quota"]):
+                rotated_key = vault.rotate_key("groq", failed_key=api_key, reason="Triage Rate Limit")
+                chat_llm_8b = ChatGroq(
+                    model_name="llama-3.1-8b-instant",
+                    groq_api_key=rotated_key,
+                    temperature=0.1,
+                    max_retries=2,
+                    response_format={"type": "json_object"}
+                )
+                res = chat_llm_8b.invoke(messages)
+            else:
+                raise groq_70b_err
+
         raw_output = str(res.content).strip()
         parsed = json.loads(raw_output)
     except Exception as e:
@@ -416,8 +423,12 @@ def sales_node(state: AgencyState) -> dict:
 
     # Task 1: Pass request to the Lead Scraper (Lead Generation Specialist)
     task1_lead_gen = Task(
-        description=f"Identify target companies, prospective B2B accounts, decision-makers, and key intelligence for: '{user_request}'. Gather pain points, company context, and format a structured lead dossier.",
-        expected_output="Structured B2B lead generation dossier detailing target accounts, pain points, and decision-maker profiles.",
+        description=(
+            f"Identify target companies, prospective B2B accounts, decision-makers, and key intelligence for: '{user_request}'. "
+            "You MUST execute the `b2b_company_scraper` tool to scrape the target company's official homepage messaging, "
+            "value propositions, and positioning before passing the prospect dossier to the VP of Sales."
+        ),
+        expected_output="Structured B2B lead generation dossier detailing target accounts, scraped homepage messaging, and pain points.",
         agent=lead_scraper
     )
 
@@ -502,10 +513,10 @@ def engineering_node(state: AgencyState) -> dict:
     task2_qa = Task(
         description=(
             f"Rigorously review the Code Surgeon's proposed code and implementation for: '{user_request}'. "
-            "Audit for syntax correctness, edge case resilience, and verify it will not break existing LangGraph orchestrator architecture. "
-            "Provide the final code and verification report."
+            "You MUST run the `python_syntax_checker` tool to verify AST syntax validity and ensure the code compiles without error. "
+            "Present the final clean, production-ready Python script and the syntax validation status."
         ),
-        expected_output="Final QA-verified production-ready Python code deliverable and audit report.",
+        expected_output="Final QA-verified production-ready Python code deliverable and syntax audit report.",
         agent=qa_tester
     )
 
@@ -946,8 +957,12 @@ def node_valuation(state: AgencyState) -> dict:
     analyst = dept.create_valuation_analyst()
 
     task = Task(
-        description=f"Perform enterprise valuation for: '{state['user_request']}' using Discounted Cash Flow (DCF), comparable company analysis (Trading Comps), and precedent transactions.",
-        expected_output="Comprehensive enterprise valuation report with DCF sensitivity, trading multiples, and fair value range.",
+        description=(
+            f"Deliver the financial valuation, live market metrics, or stock comparison requested for: '{state['user_request']}'.\n"
+            "If company tickers are provided (e.g. NVDA, AAPL, MSFT), you MUST invoke the live_market_data_puller tool to pull real-time pricing and 52-week metrics, "
+            "and format your comparative analysis strictly conforming to the requested length and structure."
+        ),
+        expected_output="Direct, accurate enterprise valuation or comparative stock analysis grounded in live tool data and conforming strictly to prompt constraints.",
         agent=analyst
     )
     crew = Crew(agents=[analyst], tasks=[task], memory=True, embedder=EMBEDDER_CONFIG, cache=True, verbose=True)
@@ -1037,13 +1052,24 @@ def node_summarizer(state: AgencyState) -> dict:
 
 def node_cfo(state: AgencyState) -> dict:
     """CFO Node: Executive synthesis of all activated departmental summaries."""
+    raw_reports = state.get("raw_department_reports", {})
+    dept_summaries = state.get("department_summaries", {})
+
+    # If only one specialized corporate department was activated, deliver its direct report
+    if len(raw_reports) == 1:
+        dept_name, report = next(iter(raw_reports.items()))
+        return {
+            "final_cfo_decision": report,
+            "final_response": report,
+            "last_active_department": dept_name
+        }
+
     llm = get_resilient_llm()
     dept = FinanceDepartment(llm)
     cfo = dept.create_cfo()
     feedback = state.get("inspector_feedback", "")
     feedback_prompt = f"\n\n[INSPECTOR GENERAL FEEDBACK TO ADDRESS IN REWRITE]:\n{feedback}" if feedback else ""
 
-    dept_summaries = state.get("department_summaries", {})
     if not dept_summaries:
         summaries_text = f"Direct Analysis for: {state['user_request']}"
     else:
@@ -1053,11 +1079,11 @@ def node_cfo(state: AgencyState) -> dict:
 
     task = Task(
         description=(
-            f"Formulate definitive board capital allocation decision and strategic recommendations for: '{state['user_request']}'.\n\n"
+            f"Formulate definitive executive synthesis and strategic recommendations for: '{state['user_request']}'.\n\n"
             f"Synthesize the compressed departmental reports from activated departments:\n\n{summaries_text}"
             f"{feedback_prompt}"
         ),
-        expected_output="Definitive CFO executive strategy report detailing capital allocation decisions, risk mitigation, valuation/WACC optimization, and board recommendations.",
+        expected_output="Definitive executive deliverable synthesizing the specialized departmental analyses into a cohesive, structured strategic outcome.",
         agent=cfo,
         output_file="output/agency_report.txt"
     )

@@ -43,13 +43,14 @@ from key_vault import vault
 # Includes automatic Multi-Key Failover rotation on RateLimitError (429) across all agents
 if not getattr(litellm, "_groq_patched", False):
     _original_completion = litellm.completion
-    def _groq_safe_completion(*args, **kwargs):
+    _original_acompletion = litellm.acompletion
+
+    def _sanitize_kwargs(kwargs):
         kwargs.pop("raw_tool_calls", None)
         kwargs.pop("tools", None)
         kwargs.pop("tool_choice", None)
         kwargs.pop("cache_breakpoint", None)
         kwargs.pop("cache_control", None)
-        
         if "messages" in kwargs and kwargs["messages"]:
             for msg in kwargs["messages"]:
                 if isinstance(msg, dict):
@@ -65,10 +66,11 @@ if not getattr(litellm, "_groq_patched", False):
                         setattr(msg, "cache_control", None)
                     except Exception:
                         pass
-        
+
+    def _groq_safe_completion(*args, **kwargs):
+        _sanitize_kwargs(kwargs)
         max_retries = 4
         for attempt in range(max_retries):
-            # Always ensure current active key is used
             current_key = vault.get_active_key("groq")
             if current_key and ("groq" in str(kwargs.get("model", "")).lower() or "groq" in str(args)):
                 kwargs["api_key"] = current_key
@@ -77,17 +79,39 @@ if not getattr(litellm, "_groq_patched", False):
                 return _original_completion(*args, **kwargs)
             except Exception as e:
                 err_str = str(e).lower()
-                if "ratelimiterror" in err_str or "429" in err_str or "rate limit" in err_str or "tokens per minute" in err_str:
+                if any(x in err_str for x in ["ratelimiterror", "429", "rate limit", "tokens per minute", "413", "entity too large"]):
                     if attempt < max_retries - 1:
-                        # Rotate to next healthy key in the vault pool
-                        new_key = vault.rotate_key("groq", failed_key=current_key, reason="429 RateLimit/TPM Exceeded")
+                        new_key = vault.rotate_key("groq", failed_key=current_key, reason="RateLimit/TPM Exceeded")
                         kwargs["api_key"] = new_key
-                        backoff_delay = (2 ** attempt) * 1.5
+                        backoff_delay = (2 ** attempt) * 2.0
                         time.sleep(backoff_delay)
                         continue
                 raise e
 
+    async def _groq_safe_acompletion(*args, **kwargs):
+        import asyncio
+        _sanitize_kwargs(kwargs)
+        max_retries = 4
+        for attempt in range(max_retries):
+            current_key = vault.get_active_key("groq")
+            if current_key and ("groq" in str(kwargs.get("model", "")).lower() or "groq" in str(args)):
+                kwargs["api_key"] = current_key
+
+            try:
+                return await _original_acompletion(*args, **kwargs)
+            except Exception as e:
+                err_str = str(e).lower()
+                if any(x in err_str for x in ["ratelimiterror", "429", "rate limit", "tokens per minute", "413", "entity too large"]):
+                    if attempt < max_retries - 1:
+                        new_key = vault.rotate_key("groq", failed_key=current_key, reason="RateLimit/TPM Exceeded")
+                        kwargs["api_key"] = new_key
+                        backoff_delay = (2 ** attempt) * 2.0
+                        await asyncio.sleep(backoff_delay)
+                        continue
+                raise e
+
     litellm.completion = _groq_safe_completion
+    litellm.acompletion = _groq_safe_acompletion
     litellm._groq_patched = True
 
 
@@ -95,19 +119,19 @@ def get_resilient_llm() -> LLM:
     """
     Constructs a central, resilient LLM instance configured with fallback routing 
     to handle RateLimitError (429) and API downtime gracefully.
-    Primary: groq/llama-3.1-8b-instant
-    Secondary Fallbacks: groq/llama-3.3-70b-versatile and OpenRouter (if API key present).
+    Primary: groq/llama-3.3-70b-versatile
+    Secondary Fallbacks: groq/llama-3.1-8b-instant and OpenRouter (if API key present).
     """
     fallbacks = [
-        "groq/llama-3.3-70b-versatile"
+        "groq/llama-3.1-8b-instant"
     ]
     
-    # Optional OpenRouter free fallback if OPENROUTER_API_KEY is configured in .env
-    if os.getenv("OPENROUTER_API_KEY"):
-        fallbacks.append("openrouter/meta-llama/llama-3-8b-instruct:free")
+    # Optional OpenRouter fallback if OPENROUTER_API_KEY is configured
+    if os.getenv("OPENROUTER_API_KEY") or vault.get_active_key("openrouter"):
+        fallbacks.append("openrouter/meta-llama/llama-3.3-70b-instruct")
 
     return LLM(
-        model="groq/llama-3.1-8b-instant",
+        model="groq/llama-3.3-70b-versatile",
         fallbacks=fallbacks,
         max_retries=3,
         request_timeout=60
@@ -316,12 +340,19 @@ class FinanceDepartment:
         )
 
     def create_valuation_analyst(self) -> Agent:
-        """Valuation Analyst: Enterprise valuation, DCF modeling, trading comps & transaction multiples."""
+        """Valuation Analyst: Enterprise valuation, live equity data pulling, DCF modeling, trading comps & transaction multiples."""
         return Agent(
             role="Valuation Analyst",
-            goal="Determine enterprise value using Discounted Cash Flow (DCF), comparable company analysis (Comps), and precedent transactions. Always search the live web for the most recent data before making conclusions.",
-            backstory="You are an expert Valuation Analyst skilled in business valuation, terminal value calculations, intrinsic valuation, EV/EBITDA multiples, and sensitivity modeling. You establish reliable enterprise and equity valuation range estimates for strategic decisions.",
-            tools=[live_web_search],
+            goal=(
+                "Determine enterprise valuation, stock price metrics, and company comparisons using the live_market_data_puller tool "
+                "to pull live market numbers (NVDA, AAPL, etc.), Discounted Cash Flow (DCF), and comparable company analysis."
+            ),
+            backstory=(
+                "You are an expert Valuation Analyst skilled in real-time equity analysis, business valuation, intrinsic valuation, "
+                "52-week price ranges, and comparative stock metrics. You MUST trigger the live_market_data_puller tool for stock ticker "
+                "queries to fetch live market numbers and produce strictly empirical, hallucination-free financial comparisons."
+            ),
+            tools=[live_market_data_puller, live_web_search],
             verbose=True,
             memory=True,
             llm=self.llm

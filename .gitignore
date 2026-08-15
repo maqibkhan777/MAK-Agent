@@ -1,6 +1,7 @@
 # Environment variables & secrets
 .env
 *.env
+api_keys_config.json
 
 # Python Virtual Environments
 .venv/
@@ -16,6 +17,14 @@ __pycache__/
 # Local Output & Memory Caches
 .chroma/
 db/
+*.db
+*.db-shm
+*.db-wal
+output/
+desktop_client/output/
+desktop_client/dist/
+desktop_client/release/
+desktop_client/node_modules/
 
 # IDE & OS
 .vscode/
