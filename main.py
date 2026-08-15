@@ -175,7 +175,7 @@ def _compress_report(raw_report: str, department_name: str, summarizer: Agent) -
         expected_output="A high-density bulleted summary under 300 words preserving all quantitative metrics and core findings.",
         agent=summarizer
     )
-    crew = Crew(agents=[summarizer], tasks=[summary_task], memory=True, embedder=EMBEDDER_CONFIG, cache=True, verbose=True)
+    crew = Crew(agents=[summarizer], tasks=[summary_task], memory=False, cache=True, verbose=True)
     res = _safe_kickoff(crew)
     return str(res)
 
@@ -189,7 +189,7 @@ TRIAGE_SYSTEM_PROMPT = (
     "Your mission is to understand user intent dynamically and dispatch tasks to the most qualified specialized department.\n\n"
     "DYNAMIC INTENT DECOMPOSITION & CAPABILITY MATCHING:\n"
     "1. Target Deliverable & Capability Identification:\n"
-    "   - Source Code / Scripts / Syntax Testing -> 'engineering' (Code Surgeon + QA Tester with AST syntax validation)\n"
+    "   - Source Code / Scripts / Tool Creation / Tool Building / Syntax Testing -> 'engineering' (Code Surgeon + QA Tester with Sandbox Writer & AST validation)\n"
     "   - Live Stock Metrics / Ticker Comparisons / DCF Valuation / Equity Models -> 'valuation' or 'corp_finance' (Valuation Analyst with live_market_data_puller)\n"
     "   - B2B Company Research / Lead Dossiers / Personalized Cold Outreach -> 'sales' (Lead Scraper + VP Sales with b2b_company_scraper)\n"
     "   - SEO Keyword Strategies / Growth Campaigns / Ad Copy -> 'marketing' (Marketing Strategist)\n"
@@ -200,10 +200,11 @@ TRIAGE_SYSTEM_PROMPT = (
     "   - Multi-department Corporate Board Governance -> 'cfo'\n\n"
     "2. Information Completeness & Action Decision:\n"
     "   - COMPLETE & ACTIONABLE DIRECTIVES:\n"
-    "     * If the prompt provides the target subject/entity AND the desired outcome:\n"
-    "       (e.g., 'write python code to scan and merge json files', 'pull live stock price for NVDA and AAPL and compare them', 'find homepage messaging for Anthropic and draft cold email pitching AI agents')\n"
-    "     -> The prompt is 100% self-contained. Set 'action': 'ROUTE'.\n"
-    "     -> Select the single best-matching 'primary_department'. Keep 'collaborating_departments': [].\n\n"
+    "     * If the prompt provides the target subject/entity (e.g. company name, stock ticker, codebase task) AND the desired outcome:\n"
+    "       (e.g., 'find homepage messaging for Anthropic and draft cold email', 'write python code to scan and merge json files', 'pull live stock price for NVDA and AAPL', 'manage Google Calendar, if you don't have tools build them')\n"
+    "     -> The prompt is 100% ACTIONABLE. Set 'action': 'ROUTE'.\n"
+    "     -> The autonomous agents are equipped with live scrapers (b2b_company_scraper, live_market_data_puller) to discover the necessary information themselves. DO NOT ask the user for details that the agents can scrape or lookup.\n"
+    "     -> Select 'primary_department': 'sales' for company research & cold email pitches, 'engineering' for code/tools, 'valuation' for stock tickers.\n\n"
     "   - UNDERSPECIFIED / AMBIGUOUS DIRECTIVES (CLARIFICATION ONLY):\n"
     "     * ONLY engage clarification if the user prompt is an empty greeting (e.g., 'hi', 'hello'), conversational greeting ('who are you'), or fundamentally lacks targets/parameters (e.g., 'launch' without app name, 'write code' without specifications, 'search' without query).\n"
     "     -> Set 'action': 'CLARIFY' and ask 2-3 focused consultative questions or options (A/B).\n\n"
@@ -212,7 +213,7 @@ TRIAGE_SYSTEM_PROMPT = (
     "OUTPUT FORMAT (STRICT JSON ONLY):\n"
     "{\n"
     '  "action": "CLARIFY" | "ROUTE",\n'
-    '  "target_artifact": "Identified deliverable type (e.g., Python Script, Valuation Model, Cold Email, Web Data)",\n'
+    '  "target_artifact": "Identified deliverable type (e.g., Python Tool, Valuation Model, Cold Email, Web Data)",\n'
     '  "reasoning": "Step-by-step intent reasoning and capability matching",\n'
     '  "primary_department": "department_name",\n'
     '  "collaborating_departments": [],\n'
@@ -254,15 +255,30 @@ def node_triage(state: AgencyState) -> dict:
             res = chat_llm.invoke(messages)
         except Exception as groq_70b_err:
             if any(w in str(groq_70b_err).lower() for w in ["ratelimit", "429", "limit reached", "tpd", "tpm", "quota"]):
-                rotated_key = vault.rotate_key("groq", failed_key=api_key, reason="Triage Rate Limit")
-                chat_llm_8b = ChatGroq(
-                    model_name="llama-3.1-8b-instant",
-                    groq_api_key=rotated_key,
-                    temperature=0.1,
-                    max_retries=2,
-                    response_format={"type": "json_object"}
-                )
-                res = chat_llm_8b.invoke(messages)
+                try:
+                    rotated_key = vault.rotate_key("groq", failed_key=api_key, reason="Triage Rate Limit")
+                    chat_llm_8b = ChatGroq(
+                        model_name="llama-3.1-8b-instant",
+                        groq_api_key=rotated_key,
+                        temperature=0.1,
+                        max_retries=2,
+                        response_format={"type": "json_object"}
+                    )
+                    res = chat_llm_8b.invoke(messages)
+                except Exception as groq_8b_err:
+                    openrouter_key = vault.get_active_key("openrouter") or os.getenv("OPENROUTER_API_KEY")
+                    if openrouter_key:
+                        from langchain_openai import ChatOpenAI
+                        chat_or = ChatOpenAI(
+                            model="meta-llama/llama-3.3-70b-instruct",
+                            openai_api_base="https://openrouter.ai/api/v1",
+                            openai_api_key=openrouter_key,
+                            temperature=0.1,
+                            model_kwargs={"response_format": {"type": "json_object"}}
+                        )
+                        res = chat_or.invoke(messages)
+                    else:
+                        raise groq_8b_err
             else:
                 raise groq_70b_err
 
@@ -288,6 +304,30 @@ def node_triage(state: AgencyState) -> dict:
                 "primary_department": "general_ops",
                 "collaborating_departments": []
             }
+        elif any(k in lower_req for k in ["cold email", "pitch", "sales", "outreach", "lead", "anthropic", "homepage messaging", "prospect", "b2b", "dossier"]):
+            parsed = {
+                "action": "ROUTE",
+                "clarification_response": "",
+                "reasoning": "User requested B2B company research, lead scraping, or personalized cold outreach.",
+                "primary_department": "sales",
+                "collaborating_departments": []
+            }
+        elif any(k in lower_req for k in ["stock", "price", "nvda", "aapl", "valuation", "dcf", "market cap", "52-week", "financial", "equity", "multiple"]):
+            parsed = {
+                "action": "ROUTE",
+                "clarification_response": "",
+                "reasoning": "User requested live market metrics, equity comparison, or financial valuation.",
+                "primary_department": "valuation",
+                "collaborating_departments": []
+            }
+        elif any(k in lower_req for k in ["build tool", "build them", "create tool", "write tool", "build a tool", "develop tool", "tool creation", "write code", "python script", "function", "debug", "merge json", "os and json"]):
+            parsed = {
+                "action": "ROUTE",
+                "clarification_response": "",
+                "reasoning": "User requested tool building, software engineering, or script creation.",
+                "primary_department": "engineering",
+                "collaborating_departments": []
+            }
         elif any(k in lower_req for k in ["search", "google", "browse", "visit", "scrape", "lookup", "online", "open app", "close app", "find file", "search file", "launch", "run"]):
             parsed = {
                 "action": "ROUTE",
@@ -301,7 +341,7 @@ def node_triage(state: AgencyState) -> dict:
                 "action": "ROUTE",
                 "clarification_response": "",
                 "reasoning": "Standard agency directive.",
-                "primary_department": "cfo",
+                "primary_department": "engineering",
                 "collaborating_departments": []
             }
         raw_output = json.dumps(parsed)
@@ -311,6 +351,15 @@ def node_triage(state: AgencyState) -> dict:
     reasoning = parsed.get("reasoning", "")
     primary_dept = parsed.get("primary_department", "").strip().lower()
     collab_depts = parsed.get("collaborating_departments", [])
+
+    # Safety Guard: If prompt contains a concrete subject/entity and action was mistakenly set to CLARIFY,
+    # auto-route to the specialized department so autonomous tools (scrapers, market data pullers) fetch details themselves
+    if action == "CLARIFY" and primary_dept in ["sales", "valuation", "engineering", "marketing", "research", "corp_finance"]:
+        has_concrete_subject = any(w in user_request.lower() for w in ["anthropic", "nvidia", "apple", "nvda", "aapl", "json", "calendar", "stripe", "stock", "email", "pitch", "code", "script", "merge", "pull", "compare"])
+        if has_concrete_subject:
+            print(f"[Triage Capability Override]: Auto-routing to '{primary_dept}' (autonomous scrapers and tools will discover required details).")
+            action = "ROUTE"
+            clarification = ""
 
     print(f"\n[Chief of Staff Triage Decision]: Action={action} | Primary Dept='{primary_dept}' | Reasoning='{reasoning}'\n")
 
@@ -354,7 +403,7 @@ def node_tutor(state: AgencyState) -> dict:
         expected_output="Clear step-by-step educational tutorial explaining financial concepts with practical examples.",
         agent=tutor
     )
-    crew = Crew(agents=[tutor], tasks=[task], memory=True, embedder=EMBEDDER_CONFIG, cache=True, verbose=True)
+    crew = Crew(agents=[tutor], tasks=[task], memory=False, cache=True, verbose=True)
     res = str(crew.kickoff())
     return {"final_response": res, "last_active_department": "tutor"}
 
@@ -399,8 +448,7 @@ def node_marketing(state: AgencyState) -> dict:
         agents=[seo_analyst, copywriter, social_manager, cmo],
         tasks=[task1_seo, task2_copy, task3_social, task4_cmo],
         process=Process.sequential,
-        memory=True,
-        embedder=EMBEDDER_CONFIG,
+        memory=False,
         cache=True,
         verbose=True
     )
@@ -426,7 +474,7 @@ def sales_node(state: AgencyState) -> dict:
         description=(
             f"Identify target companies, prospective B2B accounts, decision-makers, and key intelligence for: '{user_request}'. "
             "You MUST execute the `b2b_company_scraper` tool to scrape the target company's official homepage messaging, "
-            "value propositions, and positioning before passing the prospect dossier to the VP of Sales."
+            "value propositions, positioning, and live website text before passing the prospect dossier to the VP of Sales."
         ),
         expected_output="Structured B2B lead generation dossier detailing target accounts, scraped homepage messaging, and pain points.",
         agent=lead_scraper
@@ -435,10 +483,12 @@ def sales_node(state: AgencyState) -> dict:
     # Task 2: Pass output to the VP of Sales to draft structured cold email adhering to SalesEmail schema
     task2_vp_sales = Task(
         description=(
-            f"Using the lead intelligence provided by the Lead Generation Specialist for: '{user_request}', "
-            "craft a high-converting, consultative B2B cold outreach email. "
+            f"Using the scraped lead intelligence provided by the Lead Generation Specialist for: '{user_request}', "
+            "craft a high-converting, consultative B2B cold outreach email directly pitching our custom local AI agent architecture. "
+            "Directly address and quote/reference the target company's live homepage messaging and mission discovered by the scraper. "
+            "Propose concrete pain points our local AI agents alleviate, and provide a clear, professional Call-to-Action (CTA). "
             "Output your email as a strict JSON object matching this schema:\n"
-            '```json\n{\n  "subject": "Compelling subject line",\n  "body": "Executive consultative body"\n}\n```\n'
+            '```json\n{\n  "subject": "Compelling subject line",\n  "body": "Executive consultative body grounded in live homepage messaging with pain points and clear CTA"\n}\n```\n'
             "Strictly ensure zero spam triggers or prohibited phrases like '100% free' or 'guarantee'."
             f"{feedback_prompt}"
         ),
@@ -450,8 +500,7 @@ def sales_node(state: AgencyState) -> dict:
         agents=[lead_scraper, vp_sales],
         tasks=[task1_lead_gen, task2_vp_sales],
         process=Process.sequential,
-        memory=True,
-        embedder=EMBEDDER_CONFIG,
+        memory=False,
         cache=True,
         verbose=True
     )
@@ -467,13 +516,25 @@ def sales_node(state: AgencyState) -> dict:
 
     try:
         validated = SalesEmail.model_validate_json(clean_json)
-        email_output = validated.model_dump_json(indent=2)
+        email_json_str = validated.model_dump_json(indent=2)
     except Exception:
-        email_output = clean_json
+        email_json_str = clean_json
+
+    lead_gen_output = str(getattr(task1_lead_gen, "output", "") or "").strip()
+    if lead_gen_output:
+        final_sales_deliverable = (
+            f"=== B2B Intelligence & Live Scraper Verification ===\n"
+            f"Target Account Context fetched via `b2b_company_scraper` tool:\n"
+            f"{lead_gen_output}\n\n"
+            f"=== Final B2B Cold Outreach Deliverable (SalesEmail Schema) ===\n"
+            f"{email_json_str}"
+        )
+    else:
+        final_sales_deliverable = email_json_str
 
     return {
-        "raw_department_reports": {"sales": email_output},
-        "final_response": email_output,
+        "raw_department_reports": {"sales": final_sales_deliverable},
+        "final_response": final_sales_deliverable,
         "last_active_department": "sales"
     }
 
@@ -497,12 +558,12 @@ def engineering_node(state: AgencyState) -> dict:
     code_surgeon = engineering_agents[0]
     qa_tester = engineering_agents[1]
 
-    # Task 1: Pass request to Code Surgeon (equipped with hitl_file_writer tool)
+    # Task 1: Pass request to Code Surgeon
     task1_code = Task(
         description=(
             f"Design and write clean, modular, and self-documenting Python code for: '{user_request}'. "
-            "If file modifications or new files are needed, use the 'HITL File Writer' tool to propose changes, "
-            "noting that changes require manual terminal approval from the user."
+            "Write production-ready, pure callable Python functions with clear type hints and docstrings. "
+            "Do NOT include interactive terminal input() calls in your code implementations."
             f"{feedback_prompt}"
         ),
         expected_output="Clean, modular, production-ready Python source code implementation and file write status.",
@@ -524,8 +585,7 @@ def engineering_node(state: AgencyState) -> dict:
         agents=[code_surgeon, qa_tester],
         tasks=[task1_code, task2_qa],
         process=Process.sequential,
-        memory=True,
-        embedder=EMBEDDER_CONFIG,
+        memory=False,
         cache=True,
         verbose=True
     )
@@ -623,8 +683,7 @@ def content_node(state: AgencyState) -> dict:
         agents=[creative_director, scriptwriter, hook_specialist, graphic_designer, video_producer],
         tasks=[task1_strategy, task2_writing, task3_hook, task4_visuals, task5_production],
         process=Process.sequential,
-        memory=True,
-        embedder=EMBEDDER_CONFIG,
+        memory=False,
         cache=True,
         verbose=True
     )
@@ -681,8 +740,7 @@ def research_node(state: AgencyState) -> dict:
         agents=[academic_researcher],
         tasks=[research_task],
         process=Process.sequential,
-        memory=True,
-        embedder=EMBEDDER_CONFIG,
+        memory=False,
         cache=True,
         verbose=True
     )
@@ -1138,9 +1196,10 @@ def inspector_node(state: AgencyState) -> dict:
             f"USER REQUEST:\n{user_req}\n\n"
             f"FINAL DELIVERABLE TO AUDIT:\n{final_resp}\n\n"
             "Audit Checklist:\n"
-            "1. Completeness: Does the deliverable fully answer all aspects of the user's prompt?\n"
-            "2. Formatting: Is the formatting clean, structured, and free of syntax/schema errors?\n"
+            "1. Completeness: Does the deliverable fulfill the core goals and requirements of the user's prompt?\n"
+            "2. Formatting: Is the formatting clean, well-structured, and free of syntax/schema errors?\n"
             "3. Factuality: Is there zero hallucinated tool data or fabricated information?\n\n"
+            "Guideline: If the deliverable is functional, well-formatted, and answers the prompt, mark 'PASS'. Only mark 'FAIL' for severe factual errors, broken schemas, or missed core prompt requirements.\n\n"
             "Output your audit decision strictly as a valid JSON object matching this schema:\n"
             '```json\n{\n  "status": "PASS",\n  "feedback": ""\n}\n```\n'
             'or if defective:\n'

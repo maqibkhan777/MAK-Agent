@@ -39,6 +39,11 @@ from custom_tools import live_web_search
 
 from key_vault import vault
 
+# Suppress noisy LiteLLM logs and warnings
+litellm.suppress_debug_info = True
+litellm.drop_params = True
+os.environ["LITELLM_LOG"] = "ERROR"
+
 # Centrally sanitize prompt-caching headers and native tool definitions incompatible with Groq API
 # Includes automatic Multi-Key Failover rotation on RateLimitError (429) across all agents
 if not getattr(litellm, "_groq_patched", False):
@@ -69,7 +74,7 @@ if not getattr(litellm, "_groq_patched", False):
 
     def _groq_safe_completion(*args, **kwargs):
         _sanitize_kwargs(kwargs)
-        max_retries = 4
+        max_retries = 3
         for attempt in range(max_retries):
             current_key = vault.get_active_key("groq")
             if current_key and ("groq" in str(kwargs.get("model", "")).lower() or "groq" in str(args)):
@@ -79,19 +84,37 @@ if not getattr(litellm, "_groq_patched", False):
                 return _original_completion(*args, **kwargs)
             except Exception as e:
                 err_str = str(e).lower()
-                if any(x in err_str for x in ["ratelimiterror", "429", "rate limit", "tokens per minute", "413", "entity too large"]):
+                if any(x in err_str for x in ["ratelimiterror", "429", "rate limit", "tokens per minute", "tokens per day", "tpd", "tpm", "quota", "413", "entity too large"]):
                     if attempt < max_retries - 1:
                         new_key = vault.rotate_key("groq", failed_key=current_key, reason="RateLimit/TPM Exceeded")
                         kwargs["api_key"] = new_key
-                        backoff_delay = (2 ** attempt) * 2.0
-                        time.sleep(backoff_delay)
+                        time.sleep(0.5)
                         continue
+                    else:
+                        # 1. Attempt OpenRouter failover
+                        openrouter_key = vault.get_active_key("openrouter") or os.getenv("OPENROUTER_API_KEY")
+                        if openrouter_key:
+                            kwargs["model"] = "openrouter/meta-llama/llama-3.3-70b-instruct"
+                            kwargs["api_key"] = openrouter_key
+                            try:
+                                return _original_completion(*args, **kwargs)
+                            except Exception as or_err:
+                                pass
+                        
+                        # 2. Attempt Groq 8B Instant failover
+                        if "70b" in str(kwargs.get("model", "")).lower():
+                            kwargs["model"] = "groq/llama-3.1-8b-instant"
+                            kwargs["api_key"] = vault.get_active_key("groq")
+                            try:
+                                return _original_completion(*args, **kwargs)
+                            except Exception:
+                                pass
                 raise e
 
     async def _groq_safe_acompletion(*args, **kwargs):
         import asyncio
         _sanitize_kwargs(kwargs)
-        max_retries = 4
+        max_retries = 3
         for attempt in range(max_retries):
             current_key = vault.get_active_key("groq")
             if current_key and ("groq" in str(kwargs.get("model", "")).lower() or "groq" in str(args)):
@@ -101,13 +124,31 @@ if not getattr(litellm, "_groq_patched", False):
                 return await _original_acompletion(*args, **kwargs)
             except Exception as e:
                 err_str = str(e).lower()
-                if any(x in err_str for x in ["ratelimiterror", "429", "rate limit", "tokens per minute", "413", "entity too large"]):
+                if any(x in err_str for x in ["ratelimiterror", "429", "rate limit", "tokens per minute", "tokens per day", "tpd", "tpm", "quota", "413", "entity too large"]):
                     if attempt < max_retries - 1:
                         new_key = vault.rotate_key("groq", failed_key=current_key, reason="RateLimit/TPM Exceeded")
                         kwargs["api_key"] = new_key
-                        backoff_delay = (2 ** attempt) * 2.0
-                        await asyncio.sleep(backoff_delay)
+                        await asyncio.sleep(0.5)
                         continue
+                    else:
+                        # 1. Attempt OpenRouter failover
+                        openrouter_key = vault.get_active_key("openrouter") or os.getenv("OPENROUTER_API_KEY")
+                        if openrouter_key:
+                            kwargs["model"] = "openrouter/meta-llama/llama-3.3-70b-instruct"
+                            kwargs["api_key"] = openrouter_key
+                            try:
+                                return await _original_acompletion(*args, **kwargs)
+                            except Exception as or_err:
+                                pass
+                        
+                        # 2. Attempt Groq 8B Instant failover
+                        if "70b" in str(kwargs.get("model", "")).lower():
+                            kwargs["model"] = "groq/llama-3.1-8b-instant"
+                            kwargs["api_key"] = vault.get_active_key("groq")
+                            try:
+                                return await _original_acompletion(*args, **kwargs)
+                            except Exception:
+                                pass
                 raise e
 
     litellm.completion = _groq_safe_completion

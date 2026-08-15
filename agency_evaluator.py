@@ -298,6 +298,45 @@ def run_evaluation_suite() -> Dict[str, Any]:
                 f.write(f"Execution Error: {item.get('error')}\n\n")
 
     print(f"\n[Saved] Detailed health report persisted to '{report_path}'.\n")
+
+    # Automated CDP Live Browser Handoff on QA failure
+    if agency_health_percentage < 100.0 or any("score" not in r or r.get("total_score", 0) < 11 for r in results):
+        print("\n" + "=" * 78)
+        print(" ⚠️ QA DEFICIENCIES DETECTED -> TRIGGERING LIVE CHROME CDP GEMINI HANDOFF")
+        print("=" * 78)
+        try:
+            from qa_feedback_loop import connect_to_live_browser, paste_qa_report_to_gemini
+            master_prompt = (
+                "My LangGraph AI agency failed its QA test. Here is the exact console output and failure report:\n\n"
+                f"Overall Agency Health: {agency_health_percentage}% ({total_earned_points}/{total_possible_points} points)\n\n"
+            )
+            for item in results:
+                t = item["test"]
+                test_id = item["id"]
+                master_prompt += f"--- [{test_id}] {t['department']} ---\n"
+                master_prompt += f"Prompt: {t['prompt']}\n"
+                if "score" in item:
+                    s = item["score"]
+                    master_prompt += f"Score: {item['total_score']}/15 | Critique: {s.critique}\n\n"
+                else:
+                    master_prompt += f"Error: {item.get('error')}\n\n"
+
+            master_prompt += "Based on these errors, provide the exact Python code fixes to repair the broken departments."
+            
+            page, browser, playwright, err = connect_to_live_browser()
+            if not err and page:
+                paste_qa_report_to_gemini(page, master_prompt)
+                print("✔ Failure report successfully pasted into Gemini in your active Chrome window!")
+                time.sleep(2)
+                try:
+                    playwright.stop()
+                except Exception:
+                    pass
+            else:
+                print(f"[CDP Notice] {err}")
+        except Exception as cdp_err:
+            print(f"[CDP Notice] Could not attach to live Chrome: {cdp_err}")
+
     return {
         "health_score": agency_health_percentage,
         "total_earned": total_earned_points,

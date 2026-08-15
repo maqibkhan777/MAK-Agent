@@ -407,5 +407,43 @@ def clear_cognitive_memory(session_id: Optional[str] = None):
     }
 
 
+class CognifyRequest(BaseModel):
+    directory_path: str = "./company_knowledge_base"
+
+class MemoryQueryRequest(BaseModel):
+    query: str
+    search_type: str = "GRAPH"
+
+
+@app.post("/api/memory/cognify", tags=["Cognee Knowledge Graph"])
+async def trigger_cognify_knowledge_base(req: CognifyRequest):
+    """Ingests documentation from directory and builds persistent Cognee Knowledge Graph + LanceDB index."""
+    try:
+        from memory_layer import cognify_knowledge_base
+        summary = await cognify_knowledge_base(req.directory_path)
+        return {
+            "status": "success",
+            "message": summary
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/memory/search", tags=["Cognee Knowledge Graph"])
+def search_cognified_memory(req: MemoryQueryRequest):
+    """Queries the persistent Cognee Knowledge Graph and vector database."""
+    try:
+        from memory_layer import query_memory
+        result = query_memory(query=req.query, search_type=req.search_type)
+        return {
+            "status": "success",
+            "query": req.query,
+            "search_type": req.search_type,
+            "result": result
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 if __name__ == "__main__":
     uvicorn.run("server:app", host="0.0.0.0", port=8000, reload=False)

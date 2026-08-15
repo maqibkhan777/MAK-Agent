@@ -39,6 +39,7 @@ except ImportError:
 
 from finance_department import get_resilient_llm
 from custom_tools import live_web_search
+from surgeon_agent import restricted_file_writer, sandbox_test_runner
 
 
 # =====================================================================
@@ -134,25 +135,23 @@ class EngineeringDepartment:
         Strictly mandated to validate syntax BEFORE requesting manual human terminal approval.
         """
         tools = (
-            [python_syntax_checker, hitl_file_writer, self.knowledge_tool, live_web_search]
+            [python_syntax_checker, hitl_file_writer, restricted_file_writer, sandbox_test_runner, self.knowledge_tool, live_web_search]
             if self.knowledge_tool
-            else [python_syntax_checker, hitl_file_writer, live_web_search]
+            else [python_syntax_checker, hitl_file_writer, restricted_file_writer, sandbox_test_runner, live_web_search]
         )
         return Agent(
             role="Code Surgeon",
             goal=(
-                "Write clean, modular, highly efficient, and self-documenting Python code. "
-                "You MUST run all generated Python code through the python_syntax_checker tool and receive a 'valid' response "
-                "BEFORE you are allowed to invoke the hitl_file_writer to save it. "
-                "Understand that you CANNOT execute or write any changes without explicit manual terminal approval from the user."
+                "Write clean, modular, production-ready, and self-documenting Python code and tools. "
+                "When requested to build, create, or expand tools (e.g. Google Calendar, API clients, utilities), "
+                "use the 'Restricted File Writer' tool to save the implementation in the dynamic_tools/ sandbox, "
+                "validate syntax with 'Python Syntax Checker', and execute it with 'Sandbox Test Runner'."
             ),
             backstory=(
-                "You are an elite Code Surgeon specializing in precision Python software engineering, modular design, "
-                "clean architecture, and safe refactoring. You write maintainable, production-ready implementations with strict typing "
-                "and comprehensive docstrings. You operate under strict multi-layer safety protocols:\n"
-                "1. You MUST run all generated Python code through the python_syntax_checker tool and receive a 'valid' response BEFORE you are allowed to invoke the hitl_file_writer to save it.\n"
-                "2. If python_syntax_checker reports any SyntaxError, you inspect the exact line number and error message to self-correct the code immediately.\n"
-                "3. Once syntax is verified valid, you invoke hitl_file_writer for final manual human terminal approval."
+                "You are an elite Code Surgeon and AI Metaprogramming Specialist. You design scalable Python applications, "
+                "autonomous tool integrations, and robust utilities. When building new capabilities or tools, you write "
+                "complete, self-contained Python scripts, save them to dynamic_tools/ using the Restricted File Writer, "
+                "and verify them using the Sandbox Test Runner and Python Syntax Checker."
             ),
             tools=tools,
             verbose=True,
@@ -165,19 +164,17 @@ class EngineeringDepartment:
         QA Tester: Senior code reviewer that inspects the Code Surgeon's proposed code, audits edge cases,
         syntax errors, and verifies LangGraph orchestrator architecture compatibility before human approval.
         """
-        tools = [self.knowledge_tool, live_web_search] if self.knowledge_tool else [live_web_search]
+        tools = [sandbox_test_runner, python_syntax_checker, self.knowledge_tool, live_web_search] if self.knowledge_tool else [sandbox_test_runner, python_syntax_checker, live_web_search]
         return Agent(
             role="QA Tester",
             goal=(
                 "Ruthlessly review the Code Surgeon's proposed Python code for syntax correctness, edge case resilience, "
-                "security vulnerabilities, and verify that it will not break existing LangGraph orchestrator architecture "
-                "before it is passed to the human for final approval."
+                "security vulnerabilities, and verify that it compiles and passes sandbox execution tests."
             ),
             backstory=(
                 "You are a seasoned Senior QA Tester and Code Reviewer with deep expertise in Python systems, unit testing, "
-                "LangGraph state orchestration, and software failure modes. You inspect code for boundary condition failures, "
-                "async race conditions, resource leaks, and architectural compatibility, delivering precise audit reports "
-                "and hardening fixes before changes reach the human review stage."
+                "LangGraph state orchestration, and software failure modes. You verify AST syntax and sandbox execution logs "
+                "to ensure code is 100% production-ready."
             ),
             tools=tools,
             verbose=True,

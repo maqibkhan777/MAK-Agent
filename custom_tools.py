@@ -119,19 +119,49 @@ def live_web_search(query: str) -> str:
     if not clean_query:
         clean_query = query.strip()
 
+    formatted = []
+    # 1. Primary: Try DuckDuckGo HTML endpoint
     try:
-        results = DDGS().text(clean_query, max_results=5)
+        import urllib.parse
+        import requests
+        from bs4 import BeautifulSoup
+        ddg_html_url = f"https://html.duckduckgo.com/html/?q={urllib.parse.quote_plus(clean_query)}"
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        }
+        resp = requests.get(ddg_html_url, headers=headers, timeout=6)
+        if resp.status_code == 200:
+            soup = BeautifulSoup(resp.text, "html.parser")
+            results_elements = soup.find_all("div", class_="result__body")
+            for i, elem in enumerate(results_elements[:5], 1):
+                title_elem = elem.find("a", class_="result__a")
+                snippet_elem = elem.find("a", class_="result__snippet")
+                url_elem = elem.find("a", class_="result__url")
+                t = title_elem.get_text().strip() if title_elem else ""
+                s = snippet_elem.get_text().strip() if snippet_elem else ""
+                u = url_elem.get_text().strip() if url_elem else ""
+                if t or s:
+                    formatted.append(f"{i}. Title: {t}\n   Snippet: {s}\n   URL: {u}")
+            if formatted:
+                return "\n\n".join(formatted)
+    except Exception:
+        pass
+
+    # 2. Secondary: Try DDGS
+    try:
+        results = list(DDGS().text(clean_query, max_results=5))
         if not results:
-            # Fallback with raw query
-            results = DDGS().text(query, max_results=5)
-        if not results:
-            return f"No results found for query: '{clean_query}'"
-        formatted = []
-        for i, r in enumerate(results, 1):
-            formatted.append(f"{i}. Title: {r.get('title', '')}\n   Snippet: {r.get('body', '')}\n   URL: {r.get('href', '')}")
+            results = list(DDGS().text(query, max_results=5))
+        if results:
+            for i, r in enumerate(results, 1):
+                formatted.append(f"{i}. Title: {r.get('title', '')}\n   Snippet: {r.get('body', '')}\n   URL: {r.get('href', '')}")
+            return "\n\n".join(formatted)
+    except Exception:
+        pass
+
+    if formatted:
         return "\n\n".join(formatted)
-    except Exception as e:
-        return f"Error executing live web search for '{clean_query}': {e}"
+    return f"No results found for query: '{clean_query}'"
 
 def is_port_open(host: str = "127.0.0.1", port: int = 9222, timeout: float = 0.4) -> bool:
     """Fast socket probe to verify if Chrome DevTools Protocol debugging port is listening."""
@@ -243,4 +273,11 @@ try:
 except ImportError:
     browser_tool = dynamic_browser_tool
     search_tool = live_web_search
+
+# Enterprise Cognitive Memory & Knowledge Graph Tool
+try:
+    from memory_layer import search_enterprise_memory
+except ImportError:
+    search_enterprise_memory = None
+
 

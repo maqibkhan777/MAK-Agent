@@ -91,41 +91,95 @@ def b2b_company_scraper(query: str) -> str:
     Searches DuckDuckGo for the official URL, fetches page HTML, parses visible paragraph text, and truncates to 1,500 characters.
 
     Args:
-        query: The target company name (e.g., 'Snowflake', 'Stripe', 'Datadog') or industry keyword.
+        query: The target company name (e.g., 'Anthropic', 'Snowflake', 'Stripe', 'Datadog') or industry keyword.
     """
     try:
         clean_query = query.strip()
-        # 1. Use DDGS().text(query, max_results=1) to find the top URL for the target company
-        results = list(DDGS().text(clean_query, max_results=1))
-        if not results or not results[0].get("href"):
-            return f"No company URL found for query: '{clean_query}'"
+        target_url = None
+        title = clean_query
 
-        target_url = results[0].get("href")
-        title = results[0].get("title", clean_query)
+        # 1. Primary: Fast DuckDuckGo HTML search
+        try:
+            import urllib.parse
+            ddg_html_url = f"https://html.duckduckgo.com/html/?q={urllib.parse.quote_plus(clean_query + ' official website')}"
+            headers = {
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+            }
+            ddg_resp = requests.get(ddg_html_url, headers=headers, timeout=5)
+            if ddg_resp.status_code == 200:
+                ddg_soup = BeautifulSoup(ddg_resp.text, "html.parser")
+                for a in ddg_soup.find_all("a", class_="result__url"):
+                    raw_href = a.get("href", "")
+                    if "uddg=" in raw_href:
+                        parsed_url = urllib.parse.parse_qs(urllib.parse.urlsplit(raw_href).query).get("uddg", [None])[0]
+                        if parsed_url:
+                            target_url = parsed_url
+                            title = a.get_text().strip() or clean_query
+                            break
+                    elif raw_href.startswith("http"):
+                        target_url = raw_href
+                        title = a.get_text().strip() or clean_query
+                        break
+        except Exception:
+            pass
 
-        # 2. Use requests.get(url, timeout=10) to fetch the page HTML
+        # 1b. Secondary Fallback: Try DDGS if available
+        if not target_url:
+            try:
+                results = list(DDGS().text(clean_query, max_results=2))
+                if results and results[0].get("href"):
+                    target_url = results[0].get("href")
+                    title = results[0].get("title", clean_query)
+            except Exception:
+                pass
+
+        # 1c. Tertiary Fallback: Direct domain heuristics
+        if not target_url:
+            slug = clean_query.lower().replace(" ", "").replace("'", "").replace('"', "")
+            target_url = f"https://www.{slug}.com"
+
+        # 2. Fetch page HTML with standard browser headers
         headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+            "Accept-Language": "en-US,en;q=0.9"
         }
-        response = requests.get(target_url, headers=headers, timeout=10)
-        response.raise_for_status()
+        try:
+            response = requests.get(target_url, headers=headers, timeout=10)
+            response.raise_for_status()
+        except Exception:
+            if not target_url.startswith("https://"):
+                target_url = f"https://{target_url.replace('http://', '')}"
+            response = requests.get(target_url, headers=headers, timeout=10)
+            response.raise_for_status()
 
-        # 3. Use BeautifulSoup to extract visible paragraph (<p>) text from the homepage
+        # 3. Extract title, meta description, and paragraph text
         soup = BeautifulSoup(response.text, "html.parser")
-        paragraphs = [p.get_text().strip() for p in soup.find_all("p") if p.get_text().strip()]
+        page_title = soup.title.string.strip() if soup.title and soup.title.string else title
+
+        meta_desc = ""
+        desc_tag = soup.find("meta", attrs={"name": "description"}) or soup.find("meta", attrs={"property": "og:description"})
+        if desc_tag and desc_tag.get("content"):
+            meta_desc = f"Meta Description: {desc_tag.get('content').strip()}\n"
+
+        paragraphs = [
+            p.get_text().strip() for p in soup.find_all(["p", "h1", "h2", "h3"])
+            if p.get_text().strip() and len(p.get_text().strip()) > 15
+        ]
 
         if not paragraphs:
             page_text = " ".join(soup.stripped_strings)
         else:
             page_text = "\n".join(paragraphs)
 
-        # 4. Truncate the extracted text to the first 1,500 characters
+        # 4. Truncate extracted text to 1,500 characters
         truncated_text = page_text[:1500].strip()
 
         output = (
-            f"=== B2B Company Intelligence for {title} ===\n"
-            f"Official Website: {target_url}\n\n"
-            f"Core Homepage Messaging:\n{truncated_text}\n"
+            f"=== B2B Company Intelligence for {page_title} ===\n"
+            f"Official Website: {target_url}\n"
+            f"{meta_desc}"
+            f"Core Homepage Messaging & Live Website Text:\n{truncated_text}\n"
         )
         return output
     except Exception as e:

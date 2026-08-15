@@ -22,7 +22,9 @@ yfinance>=0.2.35
 arxiv>=2.1.0
 pyperclip>=1.8.0
 
-# Embeddings, Local Memory & Audio Synthesis
+# Embeddings, Knowledge Graph Memory & Audio Synthesis
+cognee>=1.4.0
+lancedb>=0.30.0
 sentence-transformers>=2.2.0
 gTTS>=2.5.0
 schedule>=1.2.0
