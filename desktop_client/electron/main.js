@@ -7,10 +7,17 @@ const { spawn } = require('child_process');
 let mainWindow;
 let apiProcess = null;
 
-// Automatically probe port 8000 and spawn FastAPI server if not running
+// Automatically probe port 8000 and spawn FastAPI server if running as standalone/packaged app
 function ensureBackendRunning() {
+  const isDev = process.env.NODE_ENV === 'development' || !app.isPackaged;
+  // In dev mode, concurrently orchestrates server.py, so skip duplicate spawn
+  if (isDev && process.env.VITE_DEV_SERVER_URL) {
+    console.log('[MAK Core] Running in dev mode; backend managed by concurrently orchestrator.');
+    return;
+  }
+
   const req = http.get('http://127.0.0.1:8000/health', (res) => {
-    console.log('[MAK Core] FastAPI backend is already running on http://127.0.0.1:8000');
+    console.log('[MAK Core] FastAPI backend is already active on http://127.0.0.1:8000');
   });
 
   req.on('error', () => {
@@ -59,7 +66,7 @@ function createWindow() {
 
   if (isDev) {
     // In dev mode, load the Vite dev server
-    const devUrl = process.env.VITE_DEV_SERVER_URL || 'http://localhost:5173';
+    const devUrl = process.env.VITE_DEV_SERVER_URL || 'http://127.0.0.1:5173';
     mainWindow.loadURL(devUrl);
   } else {
     // In production, load the built HTML bundle
@@ -70,6 +77,13 @@ function createWindow() {
   mainWindow.once('ready-to-show', () => {
     mainWindow.show();
   });
+
+  // Fallback to guarantee window visibility
+  setTimeout(() => {
+    if (mainWindow && !mainWindow.isDestroyed() && !mainWindow.isVisible()) {
+      mainWindow.show();
+    }
+  }, 2500);
 
   // Open all external links in the default OS browser
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {

@@ -27,7 +27,7 @@ class CognitiveMemoryEngine:
         dialogue into a prompt injection block for LangGraph agents.
         """
         profile = db_manager.get_user_profile("primary_user")
-        history = db_manager.get_recent_chat_history(session_id=session_id, limit=4)
+        history = db_manager.get_recent_chat_history(session_id=session_id, limit=10)
 
         lines = ["\n[COGNITIVE MEMORY & USER IMPRESSION PROFILE]"]
 
@@ -38,7 +38,7 @@ class CognitiveMemoryEngine:
             prefs = profile.get("key_preferences", [])
             if prefs:
                 lines.append("• Key Learned Preferences:")
-                for p in prefs[:4]:
+                for p in prefs[:6]:
                     lines.append(f"   - {p}")
             projects = profile.get("active_projects", [])
             if projects:
@@ -46,16 +46,18 @@ class CognitiveMemoryEngine:
             lines.append(f"• Interaction Experience: {profile.get('total_interactions', 1)} sessions logged")
 
         if history:
-            lines.append("\n[RECENT CONVERSATION HISTORY (Context Continuity)]:")
+            lines.append("\n[RECENT MULTI-TURN CONVERSATION HISTORY (Context Continuity)]:")
             for turn in history:
                 u_text = turn.get('user_prompt', '').strip()
                 a_text = turn.get('agent_response', '').strip()
-                if len(u_text) > 180:
-                    u_text = u_text[:180] + "..."
-                if len(a_text) > 220:
-                    a_text = a_text[:220] + "..."
+                # Preserve essential context while preventing excessive token explosion
+                if len(u_text) > 500:
+                    u_text = u_text[:500] + "..."
+                if len(a_text) > 800:
+                    a_text = a_text[:800] + "..."
+                dept = turn.get('department_used', 'agent')
                 lines.append(f"User: {u_text}")
-                lines.append(f"MAK ({turn.get('department_used', 'agent')}): {a_text}")
+                lines.append(f"MAK ({dept}): {a_text}\n")
 
         lines.append("[END OF COGNITIVE MEMORY]\n")
         return "\n".join(lines)

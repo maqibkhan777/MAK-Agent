@@ -8,9 +8,14 @@ color 0B
 
 echo =====================================================================
 echo                MAK // AUTONOMOUS COGNITIVE CORE
-echo       Starting Headless FastAPI Backend & Electron Desktop App
+echo       Starting Headless FastAPI Backend ^& Electron Desktop App
 echo =====================================================================
 echo.
+
+if exist "%~dp0.venv\Scripts\activate.bat" (
+    echo [Launcher] Activating Python virtual environment...
+    call "%~dp0.venv\Scripts\activate.bat"
+)
 
 cd /d "%~dp0desktop_client"
 

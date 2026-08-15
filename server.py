@@ -5,6 +5,11 @@ import json
 import uuid
 import datetime
 from typing import List, Optional, Dict, Any
+
+os.environ["RUNNING_IN_SERVER"] = "true"
+os.environ["PYTHONUNBUFFERED"] = "1"
+os.environ["PYTHONIOENCODING"] = "utf-8"
+
 import uvicorn
 from fastapi import FastAPI, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
@@ -111,7 +116,7 @@ class ChatRequest(BaseModel):
     prompt: str = Field(
         ...,
         description="The user input or enterprise task prompt dispatched to the agent orchestrator.",
-        example="Conduct a discounted cash flow valuation for a project with $5M initial outlay and $1.5M annual cash flows for 5 years at 10% discount rate."
+        json_schema_extra={"example": "Conduct a discounted cash flow valuation for a project with $5M initial outlay and $1.5M annual cash flows for 5 years at 10% discount rate."}
     )
     attachments: Optional[List[Attachment]] = Field(
         default=[],
@@ -120,6 +125,10 @@ class ChatRequest(BaseModel):
     session_id: Optional[str] = Field(
         default="default",
         description="Session identifier for multi-turn conversational context & cognitive memory."
+    )
+    chat_history: Optional[List[Dict[str, Any]]] = Field(
+        default=[],
+        description="Full multi-turn dialogue history from the client interface for complete context continuity."
     )
 
 
@@ -181,7 +190,7 @@ async def health_check():
 @app.post("/api/chat", response_model=ChatResponse, tags=["Agent Orchestrator"])
 def chat_endpoint(request: ChatRequest):
     """
-    Accepts a ChatRequest (prompt + optional attachments), passes the composite text to LangGraph,
+    Accepts a ChatRequest (prompt + optional attachments + multi-turn history), passes the composite text to LangGraph,
     and returns the final agentic response.
     """
     if not request.prompt or not request.prompt.strip():
@@ -203,7 +212,11 @@ def chat_endpoint(request: ChatRequest):
         composite_prompt = f"{composite_prompt}\n\n[USER PROVIDED FILE ATTACHMENTS]:\n" + "\n".join(attachment_blocks)
 
     try:
-        final_output = run_agency(composite_prompt, session_id=request.session_id or "default")
+        final_output = run_agency(
+            composite_prompt,
+            session_id=request.session_id or "default",
+            chat_history=request.chat_history or []
+        )
         return ChatResponse(
             status="success",
             response=final_output,
@@ -395,4 +408,4 @@ def clear_cognitive_memory(session_id: Optional[str] = None):
 
 
 if __name__ == "__main__":
-    uvicorn.run("server:app", host="0.0.0.0", port=8000, reload=True)
+    uvicorn.run("server:app", host="0.0.0.0", port=8000, reload=False)

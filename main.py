@@ -19,7 +19,7 @@ except Exception as _px_err:
     print(f"[Arize Phoenix] Instrumentation notice: {_px_err}")
 
 import litellm
-from typing import TypedDict, Annotated, List, Literal, Optional
+from typing import TypedDict, Annotated, List, Literal, Optional, Dict, Any
 from pydantic import BaseModel, Field
 
 # UTF-8 stdout configuration for Windows console compatibility
@@ -63,6 +63,7 @@ from content_house_department import ContentHouseDepartment, get_content_team, O
 from research_department import ResearchDepartment, get_research_team, arxiv_academic_scraper
 from custom_tools import dynamic_browser_tool, live_web_search, browser_tool, search_tool
 from pc_control_tools import pc_tools, run_application, close_application, search_local_file
+from self_healing import trigger_rescue_mission
 from key_vault import vault
 from memory_engine import memory
 
@@ -185,15 +186,22 @@ def _compress_report(raw_report: str, department_name: str, summarizer: Agent) -
 
 TRIAGE_SYSTEM_PROMPT = (
     "You are the executive Chief of Staff of MAK Enterprise AI Agency.\n"
-    "Your mission is to understand user intent with complete clarity and make smart routing decisions.\n\n"
+    "Your mission is to understand user intent with complete clarity and make smart, precise routing decisions.\n\n"
     "CRITICAL OPERATIONAL RULES:\n"
-    "1. CONVERSATIONAL & CLARIFY FIRST (DO NOT GUESS):\n"
-    "   - If the user's prompt is a greeting (e.g., 'hi', 'hello', 'who are you'), conversational, vague, open-ended, or lacks essential parameters/context to execute properly (e.g., 'search the web', 'help with marketing', 'write code', 'find competitors', 'do market research'):\n"
+    "1. NEVER GUESS OR MAKE UNFOUNDED ASSUMPTIONS. IF IN DOUBT, ASK:\n"
+    "   - If the user's prompt is a greeting (e.g., 'hi', 'hello'), conversational, vague, open-ended, or lacks essential parameters/targets to execute properly:\n"
+    "     * E.g., 'launch' or 'open' without naming the exact app\n"
+    "     * E.g., 'search' or 'find' without specifying the search query\n"
+    "     * E.g., 'write code' or 'fix this' without code requirements or error details\n"
+    "     * E.g., 'help with marketing' or 'do valuation' without context\n"
     "     -> You MUST NOT guess or launch an arbitrary department workflow.\n"
     "     -> Set 'action': 'CLARIFY'.\n"
-    "     -> In 'clarification_response', write an engaging, professional, consultative response. Acknowledge their goal and ask 2-3 focused clarifying questions to gather the missing requirements (e.g., specific topics, URLs, target audience, metrics, desired output format).\n\n"
-    "2. CONCRETE DIRECTIVE ROUTING:\n"
-    "   - When the user's prompt is concrete, actionable, and contains clear targets or parameters:\n"
+    "     -> In 'clarification_response', write an engaging, professional, consultative response. Acknowledge their goal and ask 2-3 focused clarifying questions or options (e.g., Option A vs Option B) to gather the missing requirements.\n\n"
+    "2. MULTI-TURN CONTEXT & OPTION RESOLUTION:\n"
+    "   - When multi-turn conversation history is present, interpret the user's current response in the context of the previous assistant turn.\n"
+    "   - If the user selects an option (e.g., 'Option A', 'A', '1', 'the first one', 'yes', 'proceed with X'), connect it with the prior question/options, extract the full implied directive, and ROUTE to the appropriate department.\n\n"
+    "3. CONCRETE DIRECTIVE ROUTING:\n"
+    "   - When the user's prompt (or resolved multi-turn choice) is concrete, actionable, and contains clear targets or parameters:\n"
     "     -> Set 'action': 'ROUTE'.\n"
     "     -> Select the 'primary_department' from the allowed list: ['general_ops', 'research', 'marketing', 'sales', 'engineering', 'content', 'tutor', 'corp_finance', 'risk', 'treasury', 'capital_structure', 'm_and_a', 'controller', 'portfolio', 'valuation', 'credit', 'inventory', 'planner', 'cfo'].\n"
     "     -> Select any 'collaborating_departments' if cross-department collaboration is needed.\n\n"
@@ -207,13 +215,13 @@ TRIAGE_SYSTEM_PROMPT = (
     "   - 'tutor': Educational explanations and tutorials on business/financial concepts.\n"
     "   - 'cfo': High-level executive board strategy and corporate governance.\n"
     "   - 'corp_finance', 'valuation', 'risk', 'treasury', 'capital_structure', 'm_and_a': Quantitative financial models and valuations.\n\n"
-    "3. CONCISE STRUCTURE & HYPERLINK CITATIONS:\n"
+    "4. CONCISE STRUCTURE & HYPERLINK CITATIONS:\n"
     "   - All responses must be concise, structured with clear markdown headers (###), bold metrics, and structured bullet points.\n"
     "   - All citations and links MUST be formatted as clean Markdown hyperlinks `[Source Title](URL)` with meaningful anchor text. Never dump raw bare URLs.\n\n"
     "OUTPUT FORMAT (STRICT JSON ONLY):\n"
     "{\n"
     '  "action": "CLARIFY" | "ROUTE",\n'
-    '  "clarification_response": "Your conversational response with clarifying questions (if action is CLARIFY)",\n'
+    '  "clarification_response": "Your consultative response with 2-3 focused clarifying questions or options (if action is CLARIFY)",\n'
     '  "reasoning": "Step-by-step logic for clarification or chosen department(s)",\n'
     '  "primary_department": "department_name",\n'
     '  "collaborating_departments": ["dept1", "dept2"] (keep empty [] unless cross-department collaboration is strictly needed)\n'
@@ -232,37 +240,48 @@ def node_triage(state: AgencyState) -> dict:
         chat_llm = ChatGroq(
             model_name="llama-3.3-70b-versatile",
             groq_api_key=api_key,
-            temperature=0.2,
+            temperature=0.1,
             max_retries=2,
             response_format={"type": "json_object"}
         )
         sys_prompt = TRIAGE_SYSTEM_PROMPT
         if cognitive_memory:
             sys_prompt += f"\n\n{cognitive_memory}"
-        messages = [
-            SystemMessage(content=sys_prompt),
-            HumanMessage(content=f"User Request: {user_request}")
-        ]
+        
+        messages: List[BaseMessage] = [SystemMessage(content=sys_prompt)]
+        
+        # Inject preceding multi-turn dialogue history from state into triage prompt
+        state_msgs = state.get("messages") or []
+        if len(state_msgs) > 1:
+            for m in state_msgs[:-1][-6:]:
+                messages.append(m)
+        
+        messages.append(HumanMessage(content=f"User Request: {user_request}"))
+
         res = chat_llm.invoke(messages)
         raw_output = str(res.content).strip()
         parsed = json.loads(raw_output)
     except Exception as e:
         print(f"[Triage Direct LLM Notice]: {e}")
-        # Fallback keyword and conversational heuristics
-        lower_req = user_request.lower()
-        if any(g in lower_req for g in ["hi", "hello", "hey", "who are you", "what can you do", "help me"]) or len(user_request.split()) <= 3:
+        # Intelligent fallback for conversational, ambiguous, or underspecified prompts
+        lower_req = user_request.lower().strip()
+        word_count = len(lower_req.split())
+
+        if any(g in lower_req for g in ["hi", "hello", "hey", "who are you", "what can you do", "help me"]) or word_count <= 2:
             parsed = {
                 "action": "CLARIFY",
                 "clarification_response": (
                     f"Hello! I am your Chief of Staff at MAK Enterprise AI Agency.\n\n"
-                    "I can coordinate tasks across our specialized units: **Live Web Search & Windows PC Ops**, **Marketing Studio**, **Sales Outreach**, **Engineering & Python Surgeon**, **Content House**, **Academic Research**, and **Corporate Finance / CFO**.\n\n"
-                    "How can we assist you today? Please feel free to provide specific details or ask a question."
+                    "To ensure we give you the most precise deliverable, could you please clarify:\n"
+                    "1. **Primary Goal**: What specific task or outcome would you like us to achieve?\n"
+                    "2. **Target Details**: If this involves an application, codebase, research topic, or market, which one?\n"
+                    "3. **Format/Parameters**: Any specific constraints or preferred format for the result?"
                 ),
-                "reasoning": "Greeting or underspecified prompt requiring conversational clarification.",
+                "reasoning": "Greeting, ambiguous, or underspecified prompt requiring conversational clarification.",
                 "primary_department": "general_ops",
                 "collaborating_departments": []
             }
-        elif any(k in lower_req for k in ["search", "google", "browse", "visit", "scrape", "lookup", "online", "open app", "close app", "find file", "search file", "launch app", "kill app"]):
+        elif any(k in lower_req for k in ["search", "google", "browse", "visit", "scrape", "lookup", "online", "open app", "close app", "find file", "search file", "launch", "run"]):
             parsed = {
                 "action": "ROUTE",
                 "clarification_response": "",
@@ -500,7 +519,16 @@ def engineering_node(state: AgencyState) -> dict:
         verbose=True
     )
 
-    raw_code_output = str(engineering_crew.kickoff())
+    try:
+        raw_code_output = str(engineering_crew.kickoff())
+        if "syntaxerror" in raw_code_output.lower() or "traceback (most recent call last)" in raw_code_output.lower():
+            rescue_report = trigger_rescue_mission(error_traceback=raw_code_output, task_context=user_request)
+            raw_code_output = f"{raw_code_output}\n\n{rescue_report}"
+    except Exception as eng_err:
+        import traceback
+        tb = traceback.format_exc()
+        raw_code_output = trigger_rescue_mission(error_traceback=tb, task_context=user_request)
+
     return {
         "raw_department_reports": {"engineering": raw_code_output},
         "final_response": raw_code_output,
@@ -724,18 +752,18 @@ def general_ops_node(state: AgencyState) -> dict:
     tool_calls_to_run = getattr(response, "tool_calls", None) or []
 
     if not tool_calls_to_run:
-        if any(k in lower_req for k in ["open app", "launch app", "open notepad", "open calc", "launch notepad", "start notepad", "open application", "run notepad", "run app"]):
-            app_target = re.sub(r'^(please\s+)?(open|launch|run|start)\s+(the\s+)?(app\s+|application\s+)?', '', lower_req).strip()
-            tool_calls_to_run = [{"name": "run_application", "args": {"app_name": app_target or "notepad"}, "id": "direct_1"}]
-        elif any(k in lower_req for k in ["close app", "kill app", "close notepad", "terminate", "kill notepad", "close application"]):
-            app_target = re.sub(r'^(please\s+)?(close|kill|terminate|stop)\s+(the\s+)?(app\s+|application\s+)?', '', lower_req).strip()
-            if not app_target.endswith(".exe"):
-                app_target += ".exe"
+        app_launch_match = re.search(r'^(?:please\s+)?(?:open|launch|run|start)\s+(?:the\s+)?(?:app\s+|application\s+)?([a-zA-Z0-9_\-\.\s]+)$', lower_req.strip())
+        if app_launch_match:
+            app_target = app_launch_match.group(1).strip()
+            if app_target not in ["a", "an", "the", "file", "url", "link", "browser", "website"]:
+                tool_calls_to_run = [{"name": "run_application", "args": {"app_name": app_target}, "id": "direct_1"}]
+        elif any(k in lower_req for k in ["close app", "kill app", "close notepad", "terminate", "kill notepad", "close application", "stop app"]):
+            app_target = re.sub(r'^(please\s+)?(close|kill|terminate|stop|quit|exit)\s+(the\s+)?(app\s+|application\s+)?', '', lower_req).strip()
             tool_calls_to_run = [{"name": "close_application", "args": {"app_name": app_target or "notepad.exe"}, "id": "direct_2"}]
         elif any(k in lower_req for k in ["search file", "find file", "locate file", "search for file", "find the file"]):
             file_target = re.sub(r'^(please\s+)?(search\s+for\s+file|search\s+file|find\s+file|locate\s+file|find\s+the\s+file)\s+', '', lower_req).strip()
             # Extract directory if specified
-            search_dir = "." if ("current directory" in lower_req or "this directory" in lower_req) else "C:\\Users\\Objects\\Documents"
+            search_dir = "." if ("current directory" in lower_req or "this directory" in lower_req) else ""
             clean_file = file_target.replace("in the current directory", "").replace("in this directory", "").strip()
             tool_calls_to_run = [{"name": "search_local_file", "args": {"file_name": clean_file or "requirements.txt", "search_directory": search_dir}, "id": "direct_3"}]
         elif "http" in user_request or "www." in user_request:
@@ -764,16 +792,34 @@ def general_ops_node(state: AgencyState) -> dict:
         
         # Structure deliverable cleanly for Inspector General QA and user UI
         if any(c.get("name") in ["run_application", "close_application", "search_local_file"] for c in tool_calls_to_run):
-            content_str = (
-                f"### Action & Findings\n"
-                f"{raw_tool_output}\n\n"
-                f"### System Status\n"
-                f"* **Task Target**: `{user_request}`\n"
-                f"* **Execution Mode**: Native Windows OS Process / File Subsystem\n"
-                f"* **Operation**: Successfully executed."
-            )
+            has_error = any(w in raw_tool_output.lower() for w in ["failed", "error", "could not find", "could not close"])
+            if has_error:
+                rescue_report = trigger_rescue_mission(error_traceback=raw_tool_output, task_context=user_request)
+                content_str = (
+                    f"### Action & Findings\n"
+                    f"{raw_tool_output}\n\n"
+                    f"{rescue_report}\n\n"
+                    f"### System Status\n"
+                    f"* **Task Target**: `{user_request}`\n"
+                    f"* **Execution Mode**: Native Windows OS Process / File Subsystem (Autonomous Self-Healer Active)\n"
+                    f"* **Operation**: Self-Healer Diagnosed & Formulated Remediation."
+                )
+            else:
+                content_str = (
+                    f"### Action & Findings\n"
+                    f"{raw_tool_output}\n\n"
+                    f"### System Status\n"
+                    f"* **Task Target**: `{user_request}`\n"
+                    f"* **Execution Mode**: Native Windows OS Process / File Subsystem\n"
+                    f"* **Operation**: Successfully executed."
+                )
         else:
-            content_str = raw_tool_output
+            has_error = any(w in raw_tool_output.lower() for w in ["failed", "error", "could not"])
+            if has_error:
+                rescue_report = trigger_rescue_mission(error_traceback=raw_tool_output, task_context=user_request)
+                content_str = f"{raw_tool_output}\n\n{rescue_report}"
+            else:
+                content_str = raw_tool_output
     else:
         content_str = response.content if isinstance(response.content, str) else str(response.content)
 
@@ -1289,9 +1335,14 @@ app_graph = workflow.compile()
 # =====================================================================
 # 4. Main Entry Point for Streamlit & Standalone Execution
 # =====================================================================
-def run_agency(user_request: str, session_id: str = "default") -> str:
+def run_agency(
+    user_request: str,
+    session_id: str = "default",
+    chat_history: Optional[List[Dict[str, Any]]] = None
+) -> str:
     """
     Invokes the Chief of Staff Triage, Dynamic Parallel Execution, and Inspector General QA workflow.
+    - Preserves and propagates multi-turn conversational history across all LLM/LangGraph state nodes.
     - Uses CognitiveMemoryEngine to inject user profile & conversational memory.
     - Educational queries route: triage -> tutor -> inspector -> END.
     - Marketing queries route: triage -> marketing mini-crew -> inspector -> END.
@@ -1303,6 +1354,23 @@ def run_agency(user_request: str, session_id: str = "default") -> str:
     - Corporate queries route: triage -> parallel depts -> summarizer -> CFO -> inspector -> END.
     """
     cognitive_memory = memory.get_cognitive_context(session_id=session_id)
+
+    # Reconstruct multi-turn LangGraph BaseMessage stream from client chat history
+    msg_list: List[BaseMessage] = []
+    if chat_history:
+        for item in chat_history[-10:]:
+            role = item.get("role", "").lower()
+            content = item.get("content", "").strip()
+            if not content:
+                continue
+            if role == "user":
+                msg_list.append(HumanMessage(content=content))
+            elif role in ("assistant", "agent"):
+                msg_list.append(AIMessage(content=content))
+
+    # Append current user prompt as the latest HumanMessage
+    msg_list.append(HumanMessage(content=user_request))
+
     initial_state = {
         "user_request": user_request,
         "session_id": session_id,
@@ -1319,12 +1387,20 @@ def run_agency(user_request: str, session_id: str = "default") -> str:
         "inspector_feedback": "",
         "last_active_department": "",
         "inspector_decision": {},
-        "messages": []
+        "messages": msg_list
     }
 
-    final_state = app_graph.invoke(initial_state)
-    result = final_state.get("final_response") or final_state.get("final_cfo_decision", "")
-    dept = final_state.get("last_active_department") or "general_ops"
+    try:
+        final_state = app_graph.invoke(initial_state)
+        result = final_state.get("final_response") or final_state.get("final_cfo_decision", "")
+        dept = final_state.get("last_active_department") or "general_ops"
+    except Exception as exc:
+        import traceback
+        tb = traceback.format_exc()
+        print(f"\n[Agency Execution Exception Caught] Activating Self-Healer...\n{tb}")
+        rescue_report = trigger_rescue_mission(error_traceback=tb, task_context=user_request)
+        result = rescue_report
+        dept = "self_healing"
 
     # Persist turn into SQLite memory database and update user cognitive impression
     try:

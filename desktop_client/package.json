@@ -8,9 +8,9 @@
     "build": "vite build",
     "preview": "vite preview",
     "electron": "electron .",
-    "electron:dev": "concurrently -k -p \"[{name}]\" -n \"FastAPI,Vite,Electron\" -c \"green,cyan,magenta\" \"python ../server.py\" \"vite\" \"wait-on tcp:8000 tcp:5173 && electron .\"",
-    "start": "concurrently -k -p \"[{name}]\" -n \"FastAPI,Vite,Electron\" -c \"green,cyan,magenta\" \"python ../server.py\" \"vite\" \"wait-on tcp:8000 tcp:5173 && electron .\"",
-    "app": "concurrently -k -p \"[{name}]\" -n \"FastAPI,Vite,Electron\" -c \"green,cyan,magenta\" \"python ../server.py\" \"vite\" \"wait-on tcp:8000 tcp:5173 && electron .\"",
+    "electron:dev": "concurrently -k -p \"[{name}]\" -n \"FastAPI,Vite,Electron\" -c \"green,cyan,magenta\" \"python ../server.py\" \"vite\" \"wait-on tcp:127.0.0.1:8000 tcp:127.0.0.1:5173 && electron .\"",
+    "start": "concurrently -k -p \"[{name}]\" -n \"FastAPI,Vite,Electron\" -c \"green,cyan,magenta\" \"python ../server.py\" \"vite\" \"wait-on tcp:127.0.0.1:8000 tcp:127.0.0.1:5173 && electron .\"",
+    "app": "concurrently -k -p \"[{name}]\" -n \"FastAPI,Vite,Electron\" -c \"green,cyan,magenta\" \"python ../server.py\" \"vite\" \"wait-on tcp:127.0.0.1:8000 tcp:127.0.0.1:5173 && electron .\"",
     "dist": "npm run build && electron-builder"
   },
   "dependencies": {

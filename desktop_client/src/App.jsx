@@ -249,7 +249,50 @@ function renderMarkdownTable(block, key) {
   );
 }
 
+// Helper: Extract clickable choices / options (Option A / Option B / 1 / 2) from assistant responses
+function extractOptionsFromMessage(content) {
+  if (!content || typeof content !== 'string') return [];
+  const options = [];
+  const lines = content.split('\n');
+
+  for (const line of lines) {
+    const trimmed = line.trim();
+    // 1. Matches "Option A: ...", "**Option A**: ...", "A) ...", "A. ..."
+    let optMatch = trimmed.match(/^(?:[-*]\s*)?(?:\*\*)?(?:Option\s+([A-D0-9])|([A-D0-9])[\.\)])(?:\*\*)?[:\s-]+(.+)$/i);
+    if (!optMatch) {
+      // 2. Matches "1. **...**: ...", "1) ..."
+      optMatch = trimmed.match(/^(?:[-*]\s*)?(\d+)[\.\)]\s+(?:\*\*)?(.+?)(?:\*\*)?$/);
+    }
+
+    if (optMatch) {
+      const optId = (optMatch[1] || optMatch[2] || '').trim().toUpperCase();
+      const rawText = (optMatch[3] || optMatch[2] || '').trim();
+      const cleanText = rawText.replace(/^\*\*/, '').replace(/\*\*$/, '').replace(/^["']/, '').replace(/["']$/, '').trim();
+
+      if (optId && cleanText && cleanText.length > 2 && cleanText.length < 140 && !options.some(o => o.id === optId)) {
+        options.push({
+          id: optId,
+          label: `Option ${optId}`,
+          text: cleanText,
+          fullPrompt: `Option ${optId}: ${cleanText}`
+        });
+      }
+    }
+  }
+
+  return options.slice(0, 4);
+}
+
 export default function App() {
+  // Session ID Management for Multi-Turn Continuity
+  const [sessionId, setSessionId] = useState(() => {
+    try {
+      return localStorage.getItem('mak_session_id') || `session-${Date.now()}`;
+    } catch {
+      return `session-${Date.now()}`;
+    }
+  });
+
   // Chat & Agency State
   const [messages, setMessages] = useState([
     {
@@ -257,7 +300,7 @@ export default function App() {
       role: 'assistant',
       department: 'Chief of Staff',
       timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-      content: "### MAK Autonomous Cognitive Core Online 🟢\n\nI am **MAK**, your autonomous multi-department cognitive orchestrator. I clarify requirements, dispatch specialized autonomous crews, perform live internet intelligence, execute financial valuations, and schedule recurring tasks.\n\n* **Clarify & Direct**: Ask me any question or assign a complex enterprise directive.\n* **Live Web Intelligence**: Request live search, website scraping, or competitor monitoring.\n* **Multi-LLM Failover**: Configure multiple API keys in Settings to ensure zero downtime.\n* **Voice & Automation**: Listen to deliverables in voice or set automated recurring background schedules.",
+      content: "### MAK Autonomous Cognitive Core Online 🟢\n\nI am **MAK**, your autonomous multi-department cognitive orchestrator with persistent session memory. I clarify requirements, dispatch specialized autonomous crews, perform live internet intelligence, execute financial valuations, and schedule recurring tasks.\n\n* **Clarify & Direct**: Ask me any question or assign a complex enterprise directive.\n* **Live Web Intelligence**: Request live search, website scraping, or competitor monitoring.\n* **Multi-Turn Context**: All follow-up questions, options (A/B), and commands retain full memory context.",
       status: 'idle'
     }
   ]);
@@ -265,6 +308,7 @@ export default function App() {
   const [isLoading, setIsLoading] = useState(false);
   const [activeDepartment, setActiveDepartment] = useState('triage');
   const [copiedIndex, setCopiedIndex] = useState(null);
+  const [copiedCodeId, setCopiedCodeId] = useState(null);
   const [executionStartTime, setExecutionStartTime] = useState(null);
   const [executionDuration, setExecutionDuration] = useState(0);
 
@@ -702,13 +746,47 @@ export default function App() {
   };
 
   // -------------------------------------------------------------
+  // Session & Multi-Turn Controls
+  // -------------------------------------------------------------
+  const handleNewChat = () => {
+    const newId = `session-${Date.now()}`;
+    setSessionId(newId);
+    try {
+      localStorage.setItem('mak_session_id', newId);
+    } catch (e) {
+      console.warn('LocalStorage error:', e);
+    }
+    setMessages([
+      {
+        id: `init-${Date.now()}`,
+        role: 'assistant',
+        department: 'Chief of Staff',
+        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        content: "### 🟢 New Multi-Turn Session Initialized\n\nI am **MAK**, your autonomous multi-department cognitive orchestrator. How can I assist you?\n\n* All subsequent queries in this session maintain complete conversational memory.\n* Click any quick-select options or enter a new command below.",
+        status: 'idle'
+      }
+    ]);
+  };
+
+  const handleCopyCode = (code, codeId) => {
+    navigator.clipboard.writeText(code);
+    setCopiedCodeId(codeId);
+    setTimeout(() => setCopiedCodeId(null), 2000);
+  };
+
+  const handleOptionSelect = (promptText) => {
+    handleSubmit(null, promptText);
+  };
+
+  // -------------------------------------------------------------
   // Message Submission & Execution
   // -------------------------------------------------------------
-  const handleSubmit = async (e) => {
+  const handleSubmit = async (e, customPrompt = null) => {
     if (e) e.preventDefault();
-    if ((!input.trim() && attachments.length === 0) || isLoading) return;
+    const effectivePrompt = (customPrompt !== null ? customPrompt : input).trim();
+    if ((!effectivePrompt && attachments.length === 0) || isLoading) return;
 
-    const userPrompt = input.trim();
+    const userPrompt = effectivePrompt;
     const currentAttachments = [...attachments];
     const userTimestamp = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
@@ -741,6 +819,15 @@ export default function App() {
       timestamp: userTimestamp
     };
 
+    // Build multi-turn conversational history to maintain LLM context
+    const currentHistory = messages
+      .filter(m => m.status !== 'error')
+      .map(m => ({
+        role: m.role,
+        content: m.content,
+        department: m.department || 'agent'
+      }));
+
     setMessages(prev => [...prev, newUserMsg]);
     setInput('');
     setAttachments([]);
@@ -753,6 +840,8 @@ export default function App() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           prompt: userPrompt || 'Analyze attached file context and generate findings.',
+          session_id: sessionId,
+          chat_history: currentHistory,
           attachments: currentAttachments.map(a => ({
             name: a.name,
             type: a.type,
@@ -823,27 +912,41 @@ export default function App() {
     // Split code blocks first
     const parts = content.split(/(```[\s\S]*?```)/g);
     return parts.map((part, index) => {
-      // 1. Fenced Code Blocks
+      // 1. Fenced Code Blocks with Dedicated Copy Button & Syntax Styling
       if (part.startsWith('```') && part.endsWith('```')) {
         const lines = part.slice(3, -3).trim().split('\n');
         const language = lines[0].trim();
         const code = lines.slice(language ? 1 : 0).join('\n');
+        const codeBlockId = `code-block-${index}`;
+        const isCodeCopied = copiedCodeId === codeBlockId;
+
         return (
-          <div key={index} className="my-3.5 rounded-xl overflow-hidden border border-cyan-500/25 bg-slate-950/95 shadow-xl">
-            <div className="flex items-center justify-between px-3.5 py-2 bg-slate-900/90 border-b border-slate-800 text-xs text-slate-400 font-mono">
-              <span className="flex items-center gap-1.5 text-cyan-400 font-medium">
+          <div key={index} className="my-3.5 rounded-xl overflow-hidden border border-cyan-500/30 bg-slate-950 shadow-2xl">
+            <div className="flex items-center justify-between px-3.5 py-2 bg-slate-900/90 border-b border-cyan-500/20 text-xs text-slate-400 font-mono">
+              <span className="flex items-center gap-1.5 text-cyan-400 font-medium uppercase tracking-wider text-[11px]">
                 <Terminal className="w-3.5 h-3.5" />
                 {language || 'code'}
               </span>
               <button
-                onClick={() => navigator.clipboard.writeText(code)}
-                className="hover:text-cyan-300 transition-colors flex items-center gap-1 cursor-pointer"
+                type="button"
+                onClick={() => handleCopyCode(code, codeBlockId)}
+                className="hover:text-cyan-300 transition-colors flex items-center gap-1.5 px-2.5 py-1 rounded bg-slate-800/80 hover:bg-slate-800 border border-cyan-500/20 hover:border-cyan-400/40 cursor-pointer text-xs font-mono text-slate-300"
+                title="Copy code snippet"
               >
-                <Copy className="w-3 h-3" />
-                Copy
+                {isCodeCopied ? (
+                  <>
+                    <Check className="w-3.5 h-3.5 text-emerald-400" />
+                    <span className="text-emerald-400 font-semibold">Copied!</span>
+                  </>
+                ) : (
+                  <>
+                    <Copy className="w-3.5 h-3.5" />
+                    <span>Copy Code</span>
+                  </>
+                )}
               </button>
             </div>
-            <pre className="p-4 text-xs font-mono text-cyan-100/90 overflow-x-auto selection:bg-cyan-500/30">
+            <pre className="p-4 text-xs font-mono text-cyan-100/95 overflow-x-auto selection:bg-cyan-500/40 select-text leading-relaxed">
               <code>{code}</code>
             </pre>
           </div>
@@ -853,7 +956,7 @@ export default function App() {
       // 2. Prose / Paragraph / Table / List Blocks
       const paragraphs = part.split(/\n\n+/);
       return (
-        <div key={index} className="space-y-3 leading-relaxed text-sm text-slate-200">
+        <div key={index} className="space-y-3 leading-relaxed text-sm text-slate-200 select-text">
           {paragraphs.map((para, pIdx) => {
             const trimmed = para.trim();
             if (!trimmed) return null;
@@ -917,7 +1020,7 @@ export default function App() {
 
             // Standard Paragraph
             return (
-              <p key={pIdx} className="text-slate-300 leading-relaxed">
+              <p key={pIdx} className="text-slate-300 leading-relaxed select-text">
                 {renderInlineMarkdown(trimmed)}
               </p>
             );
@@ -996,6 +1099,16 @@ export default function App() {
 
         {/* Right Navigation & HUD Controls */}
         <div className="flex items-center gap-2">
+          {/* New Multi-Turn Session Button */}
+          <button
+            onClick={handleNewChat}
+            className="p-2 rounded-lg bg-cyan-950/40 border border-cyan-500/30 text-cyan-300 hover:text-white hover:bg-cyan-900/60 hover:border-cyan-400 transition-all cursor-pointer flex items-center gap-1.5 text-xs font-mono font-medium shadow-sm hover:shadow-[0_0_12px_rgba(6,182,212,0.3)]"
+            title="Start New Multi-Turn Session"
+          >
+            <RotateCcw className="w-4 h-4 text-cyan-400" />
+            <span className="hidden sm:inline font-mono">New Chat</span>
+          </button>
+
           {/* Voice Settings Toggle */}
           <button
             onClick={() => setVoiceSettingsOpen(!voiceSettingsOpen)}
@@ -1304,10 +1417,40 @@ export default function App() {
 
                       {/* Main Message Text / Markdown */}
                       {isUser ? (
-                        <p className="whitespace-pre-wrap text-sm leading-relaxed">{msg.content}</p>
+                        <p className="whitespace-pre-wrap text-sm leading-relaxed select-text">{msg.content}</p>
                       ) : (
                         renderFormattedContent(msg.content)
                       )}
+
+                      {/* Interactive Quick-Pick Option Chips (Option A / Option B / 1 / 2) */}
+                      {!isUser && (() => {
+                        const detectedOptions = extractOptionsFromMessage(msg.content);
+                        if (detectedOptions.length === 0) return null;
+
+                        return (
+                          <div className="mt-3.5 pt-3 border-t border-cyan-500/20 flex flex-wrap items-center gap-2 select-none">
+                            <span className="text-[11px] font-mono text-cyan-400 font-semibold flex items-center gap-1">
+                              <Sparkles className="w-3 h-3 text-cyan-400" />
+                              Quick Select:
+                            </span>
+                            {detectedOptions.map((opt) => (
+                              <button
+                                key={opt.id}
+                                type="button"
+                                onClick={() => handleOptionSelect(opt.fullPrompt)}
+                                className="group flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-cyan-950/80 hover:bg-cyan-900 border border-cyan-500/40 hover:border-cyan-400 text-xs font-mono text-cyan-200 hover:text-white transition-all cursor-pointer shadow-md hover:shadow-[0_0_12px_rgba(6,182,212,0.4)]"
+                                title={`Select ${opt.label}: ${opt.text}`}
+                              >
+                                <span className="w-4 h-4 rounded-full bg-cyan-500/30 group-hover:bg-cyan-400 text-cyan-300 group-hover:text-slate-950 flex items-center justify-center font-bold text-[10px] transition-colors">
+                                  {opt.id}
+                                </span>
+                                <span className="font-medium truncate max-w-[200px] sm:max-w-[260px]">{opt.text}</span>
+                                <ChevronRight className="w-3 h-3 text-cyan-400 group-hover:translate-x-0.5 transition-transform shrink-0" />
+                              </button>
+                            ))}
+                          </div>
+                        );
+                      })()}
                     </div>
 
                     {/* Action Bar (Audio Listen & Copy) for AI responses */}
@@ -1315,6 +1458,7 @@ export default function App() {
                       <div className="flex items-center gap-2 mt-2 px-1 text-xs font-mono">
                         {/* Audio Speak Button */}
                         <button
+                          type="button"
                           onClick={() => handleSpeak(msg.id, msg.content)}
                           className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md border transition-all cursor-pointer ${
                             isCurrentlySpeaking
@@ -1342,18 +1486,20 @@ export default function App() {
 
                         {/* Copy Deliverable Button */}
                         <button
+                          type="button"
                           onClick={() => handleCopy(msg.content, index)}
                           className="flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-slate-900/60 border border-white/5 text-slate-400 hover:text-white hover:border-white/20 transition-colors cursor-pointer"
+                          title="Copy Full Deliverable (Markdown / Text)"
                         >
                           {copiedIndex === index ? (
                             <>
                               <Check className="w-3.5 h-3.5 text-emerald-400" />
-                              <span className="text-emerald-400">Copied</span>
+                              <span className="text-emerald-400 font-semibold">Copied</span>
                             </>
                           ) : (
                             <>
                               <Copy className="w-3.5 h-3.5" />
-                              <span>Copy</span>
+                              <span>Copy Text</span>
                             </>
                           )}
                         </button>
