@@ -1,0 +1,46 @@
+[
+  {
+    "job_id": "job-3f09b891",
+    "job_name": "Launch Mattermost",
+    "prompt": "Launch mattermost",
+    "department": "auto",
+    "timestamp": "2026-08-16 18:44:13",
+    "status": "success",
+    "duration_sec": 3.45,
+    "result_preview": "### Action & Findings\nSuccessfully launched 'Mattermost' (resolved to: C:\\Users\\Objects\\AppData\\Roaming\\Microsoft\\Windows\\Start Menu\\Programs\\Mattermost.lnk).\n\n### System Status\n* **Task Target**: `Launch mattermost`\n* **Execution Mode**: Native Windows OS Process / File Subsystem\n* **Operation**: S...",
+    "full_result": "### Action & Findings\nSuccessfully launched 'Mattermost' (resolved to: C:\\Users\\Objects\\AppData\\Roaming\\Microsoft\\Windows\\Start Menu\\Programs\\Mattermost.lnk).\n\n### System Status\n* **Task Target**: `Launch mattermost`\n* **Execution Mode**: Native Windows OS Process / File Subsystem\n* **Operation**: Successfully executed."
+  },
+  {
+    "job_id": "job-3f09b891",
+    "job_name": "Launch Mattermost",
+    "prompt": "Launch mattermost",
+    "department": "auto",
+    "timestamp": "2026-08-16 18:37:19",
+    "status": "success",
+    "duration_sec": 14.98,
+    "result_preview": "### Action & Findings\nSuccessfully launched 'Mattermost' (resolved to: C:\\Users\\Objects\\AppData\\Roaming\\Microsoft\\Windows\\Start Menu\\Programs\\Mattermost.lnk).\n\n### System Status\n* **Task Target**: `Launch mattermost`\n* **Execution Mode**: Native Windows OS Process / File Subsystem\n* **Operation**: S...",
+    "full_result": "### Action & Findings\nSuccessfully launched 'Mattermost' (resolved to: C:\\Users\\Objects\\AppData\\Roaming\\Microsoft\\Windows\\Start Menu\\Programs\\Mattermost.lnk).\n\n### System Status\n* **Task Target**: `Launch mattermost`\n* **Execution Mode**: Native Windows OS Process / File Subsystem\n* **Operation**: Successfully executed."
+  },
+  {
+    "job_id": "job-3f09b891",
+    "job_name": "Launch Mattermost",
+    "prompt": "Launch mattermost",
+    "department": "auto",
+    "timestamp": "2026-08-16 18:02:11",
+    "status": "success",
+    "duration_sec": 3.08,
+    "result_preview": "### Action & Findings\nSuccessfully launched 'Mattermost' (resolved to: C:\\Users\\Objects\\AppData\\Roaming\\Microsoft\\Windows\\Start Menu\\Programs\\Mattermost.lnk).\n\n### System Status\n* **Task Target**: `Launch mattermost`\n* **Execution Mode**: Native Windows OS Process / File Subsystem\n* **Operation**: S...",
+    "full_result": "### Action & Findings\nSuccessfully launched 'Mattermost' (resolved to: C:\\Users\\Objects\\AppData\\Roaming\\Microsoft\\Windows\\Start Menu\\Programs\\Mattermost.lnk).\n\n### System Status\n* **Task Target**: `Launch mattermost`\n* **Execution Mode**: Native Windows OS Process / File Subsystem\n* **Operation**: Successfully executed."
+  },
+  {
+    "job_id": "job-3f09b891",
+    "job_name": "Launch Mattermost",
+    "prompt": "Launch mattermost",
+    "department": "auto",
+    "timestamp": "2026-08-16 18:00:06",
+    "status": "success",
+    "duration_sec": 6.51,
+    "result_preview": "### Action & Findings\nSuccessfully launched 'mattermost' (resolved to: C:\\Users\\Objects\\AppData\\Roaming\\Microsoft\\Windows\\Start Menu\\Programs\\Mattermost.lnk).\n\n### System Status\n* **Task Target**: `Launch mattermost`\n* **Execution Mode**: Native Windows OS Process / File Subsystem\n* **Operation**: S...",
+    "full_result": "### Action & Findings\nSuccessfully launched 'mattermost' (resolved to: C:\\Users\\Objects\\AppData\\Roaming\\Microsoft\\Windows\\Start Menu\\Programs\\Mattermost.lnk).\n\n### System Status\n* **Task Target**: `Launch mattermost`\n* **Execution Mode**: Native Windows OS Process / File Subsystem\n* **Operation**: Successfully executed."
+  }
+]

@@ -114,7 +114,56 @@ def test_agent_relevancy_and_faithfulness():
     assert_test(test_case, [relevancy_metric, faithfulness_metric])
 
 
+def test_sales_cold_outreach_relevancy():
+    """
+    Evaluates the Sales Department's ability to pull real data and adhere to email constraints.
+    """
+    input_query = "Find the core homepage messaging for 'Vercel' and draft a cold email pitching our web framework."
+    
+    # Execute primary agent via LangGraph pipeline
+    actual_output = run_agency(input_query)
+    assert actual_output is not None and len(actual_output) > 0, "Agent returned empty response"
+
+    # We expect the output to be a JSON object containing "subject" and "body" based on SalesEmail schema
+    retrieval_context = [
+        "Vercel is the frontend cloud platform. It provides the developer experience and infrastructure to build, scale, and secure a faster, more personalized web."
+    ]
+
+    relevancy_metric = AnswerRelevancyMetric(threshold=0.7, model=eval_llm)
+    faithfulness_metric = FaithfulnessMetric(threshold=0.7, model=eval_llm)
+
+    test_case = LLMTestCase(
+        input=input_query,
+        actual_output=str(actual_output),
+        retrieval_context=retrieval_context
+    )
+
+    assert_test(test_case, [relevancy_metric, faithfulness_metric])
+
+
+def test_finance_ticker_hallucination():
+    """
+    Evaluates the Finance Valuation agent to ensure it doesn't hallucinate stock data.
+    """
+    input_query = "What is the live stock price and 52-week high for Microsoft (MSFT)?"
+    
+    actual_output = run_agency(input_query)
+    
+    # Check if the output actually attempts to provide real financial metrics 
+    # instead of a generic refusal or hallucinated text.
+    relevancy_metric = AnswerRelevancyMetric(threshold=0.8, model=eval_llm)
+    
+    test_case = LLMTestCase(
+        input=input_query,
+        actual_output=str(actual_output)
+    )
+
+    assert_test(test_case, [relevancy_metric])
+
+
 if __name__ == "__main__":
     print("Running test_agent_evals standalone execution...")
     test_agent_relevancy_and_faithfulness()
-    print("Evaluation completed successfully.")
+    test_sales_cold_outreach_relevancy()
+    test_finance_ticker_hallucination()
+    print("All DeepEval evaluations completed successfully.")

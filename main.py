@@ -62,7 +62,7 @@ from engineering_department import EngineeringDepartment, get_engineering_team, 
 from content_house_department import ContentHouseDepartment, get_content_team, OmnichannelDeliverable, ContentDeliverable
 from research_department import ResearchDepartment, get_research_team, arxiv_academic_scraper
 from custom_tools import dynamic_browser_tool, live_web_search, browser_tool, search_tool
-from pc_control_tools import pc_tools, run_application, close_application, search_local_file
+from pc_control_tools import pc_tools, run_application, close_application, search_local_file, execute_system_command, get_system_metrics, open_url_in_browser
 from self_healing import trigger_rescue_mission
 from key_vault import vault
 from memory_engine import memory
@@ -759,22 +759,24 @@ node_research = research_node
 
 def general_ops_node(state: AgencyState) -> dict:
     """
-    General Operations Node: Executes generic web browsing, online chores, and native Windows PC Control operations.
-    Equipped with browser_tool, search_tool, run_application, close_application, and search_local_file.
+    General Operations Node: Executes native Windows PC Control, terminal execution, system diagnostics, and web automation.
+    Equipped with run_application, close_application, execute_system_command, get_system_metrics, open_url_in_browser, search_local_file, browser_tool, and search_tool.
     """
     user_request = state.get("user_request", "")
     feedback = state.get("inspector_feedback", "")
     feedback_prompt = f"\n\n[INSPECTOR GENERAL FEEDBACK TO ADDRESS IN REWRITE]:\n{feedback}" if feedback else ""
 
     ops_system_prompt = (
-        "You are an executive General Operations & Windows PC Controller agent.\n"
-        "You have access to tools for live internet searching, browser navigation, opening desktop applications, closing processes, and searching local files on the Windows host machine.\n"
-        "Analyze the user's directive and invoke the appropriate tool:\n"
-        "- run_application: To launch desktop software or Windows system apps (e.g., notepad, calc, code).\n"
-        "- close_application: To terminate running software by process name (e.g., notepad.exe, spotify.exe).\n"
-        "- search_local_file: To search for specific files on disk.\n"
-        "- search_tool / browser_tool: For live internet searching and web page navigation.\n"
-        "Execute the necessary tool to satisfy the prompt and return a clear, structured summary of the action taken."
+        "You are an executive General Operations & Windows System Controller agent.\n"
+        "You have complete access and direct execution capabilities on the host Windows machine with the following tools:\n"
+        "- run_application(app_name): Launches or brings to foreground any Windows application or desktop software (e.g., Mattermost, Notepad, Calculator, Chrome, VS Code).\n"
+        "- close_application(app_name): Terminates running applications or processes (e.g., notepad.exe, mattermost.exe).\n"
+        "- execute_system_command(command, working_directory): Executes PowerShell or Windows CMD commands directly on the host machine.\n"
+        "- get_system_metrics(): Retrieves live CPU %, RAM usage, disk capacity, and OS version.\n"
+        "- open_url_in_browser(url): Opens any website or URL in the default desktop web browser.\n"
+        "- search_local_file(file_name, search_directory): Searches local disk for files.\n"
+        "- search_tool(query) / browser_tool(url): For web searching and HTML scraping.\n"
+        "Analyze the directive and invoke the appropriate tool immediately. Return a structured summary of the action taken."
     )
 
     # Initialize messages conversation history
@@ -821,26 +823,29 @@ def general_ops_node(state: AgencyState) -> dict:
     tool_calls_to_run = getattr(response, "tool_calls", None) or []
 
     if not tool_calls_to_run:
-        app_launch_match = re.search(r'^(?:please\s+)?(?:open|launch|run|start)\s+(?:the\s+)?(?:app\s+|application\s+)?([a-zA-Z0-9_\-\.\s]+)$', lower_req.strip())
-        if app_launch_match:
-            app_target = app_launch_match.group(1).strip()
-            if app_target not in ["a", "an", "the", "file", "url", "link", "browser", "website"]:
-                tool_calls_to_run = [{"name": "run_application", "args": {"app_name": app_target}, "id": "direct_1"}]
-        elif any(k in lower_req for k in ["close app", "kill app", "close notepad", "terminate", "kill notepad", "close application", "stop app"]):
-            app_target = re.sub(r'^(please\s+)?(close|kill|terminate|stop|quit|exit)\s+(the\s+)?(app\s+|application\s+)?', '', lower_req).strip()
-            tool_calls_to_run = [{"name": "close_application", "args": {"app_name": app_target or "notepad.exe"}, "id": "direct_2"}]
+        if any(k in lower_req for k in ["system metric", "system specs", "cpu", "ram", "disk space", "hardware status", "pc performance", "system status", "memory usage"]):
+            tool_calls_to_run = [{"name": "get_system_metrics", "args": {}, "id": "direct_metrics"}]
+        elif any(k in lower_req for k in ["run command", "execute command", "powershell", "cmd", "terminal command", "shell command"]):
+            cmd_match = re.sub(r'^(please\s+)?(run\s+command|execute\s+command|powershell|cmd|terminal\s+command|run\s+powershell|run\s+shell)\s*:?\s*', '', user_request, flags=re.IGNORECASE).strip()
+            tool_calls_to_run = [{"name": "execute_system_command", "args": {"command": cmd_match or "Get-Process"}, "id": "direct_cmd"}]
+        elif any(k in lower_req for k in ["open url", "open website", "open in browser", "launch url", "open link"]):
+            url_m = re.findall(r'https?://[^\s<>"]+|www\.[^\s<>"]+', user_request)
+            target_url = url_m[0] if url_m else "https://www.google.com"
+            tool_calls_to_run = [{"name": "open_url_in_browser", "args": {"url": target_url}, "id": "direct_url"}]
+        elif any(k in lower_req for k in ["close app", "kill app", "close application", "terminate app", "kill process", "stop app", "close notepad", "close mattermost"]):
+            app_target = re.sub(r'^(please\s+)?(close|kill|terminate|stop|quit|exit)\s+(the\s+)?(app\s+|application\s+|process\s+)?', '', lower_req).strip()
+            tool_calls_to_run = [{"name": "close_application", "args": {"app_name": app_target or "notepad.exe"}, "id": "direct_close"}]
         elif any(k in lower_req for k in ["search file", "find file", "locate file", "search for file", "find the file"]):
             file_target = re.sub(r'^(please\s+)?(search\s+for\s+file|search\s+file|find\s+file|locate\s+file|find\s+the\s+file)\s+', '', lower_req).strip()
-            # Extract directory if specified
             search_dir = "." if ("current directory" in lower_req or "this directory" in lower_req) else ""
             clean_file = file_target.replace("in the current directory", "").replace("in this directory", "").strip()
-            tool_calls_to_run = [{"name": "search_local_file", "args": {"file_name": clean_file or "requirements.txt", "search_directory": search_dir}, "id": "direct_3"}]
-        elif "http" in user_request or "www." in user_request:
-            url_m = re.findall(r'https?://[^\s<>"]+|www\.[^\s<>"]+', user_request)
-            t_url = url_m[0] if url_m else "https://www.google.com"
-            if not t_url.startswith("http"):
-                t_url = "https://" + t_url
-            tool_calls_to_run = [{"name": "browser_tool", "args": {"url": t_url}, "id": "direct_4"}]
+            tool_calls_to_run = [{"name": "search_local_file", "args": {"file_name": clean_file or "requirements.txt", "search_directory": search_dir}, "id": "direct_file"}]
+        elif any(k in lower_req for k in ["open", "launch", "run", "start"]):
+            app_launch_match = re.search(r'^(?:please\s+)?(?:open|launch|run|start)\s+(?:the\s+)?(?:app\s+|application\s+)?([a-zA-Z0-9_\-\.\s]+)$', lower_req.strip())
+            if app_launch_match:
+                app_target = app_launch_match.group(1).strip()
+                if app_target not in ["a", "an", "the", "file", "url", "link", "browser", "website"]:
+                    tool_calls_to_run = [{"name": "run_application", "args": {"app_name": app_target}, "id": "direct_app"}]
 
     # Execute tool calls if present
     if tool_calls_to_run:
@@ -860,35 +865,14 @@ def general_ops_node(state: AgencyState) -> dict:
         raw_tool_output = "\n\n".join(results)
         
         # Structure deliverable cleanly for Inspector General QA and user UI
-        if any(c.get("name") in ["run_application", "close_application", "search_local_file"] for c in tool_calls_to_run):
-            has_error = any(w in raw_tool_output.lower() for w in ["failed", "error", "could not find", "could not close"])
-            if has_error:
-                rescue_report = trigger_rescue_mission(error_traceback=raw_tool_output, task_context=user_request)
-                content_str = (
-                    f"### Action & Findings\n"
-                    f"{raw_tool_output}\n\n"
-                    f"{rescue_report}\n\n"
-                    f"### System Status\n"
-                    f"* **Task Target**: `{user_request}`\n"
-                    f"* **Execution Mode**: Native Windows OS Process / File Subsystem (Autonomous Self-Healer Active)\n"
-                    f"* **Operation**: Self-Healer Diagnosed & Formulated Remediation."
-                )
-            else:
-                content_str = (
-                    f"### Action & Findings\n"
-                    f"{raw_tool_output}\n\n"
-                    f"### System Status\n"
-                    f"* **Task Target**: `{user_request}`\n"
-                    f"* **Execution Mode**: Native Windows OS Process / File Subsystem\n"
-                    f"* **Operation**: Successfully executed."
-                )
-        else:
-            has_error = any(w in raw_tool_output.lower() for w in ["failed", "error", "could not"])
-            if has_error:
-                rescue_report = trigger_rescue_mission(error_traceback=raw_tool_output, task_context=user_request)
-                content_str = f"{raw_tool_output}\n\n{rescue_report}"
-            else:
-                content_str = raw_tool_output
+        content_str = (
+            f"### Action & Findings\n"
+            f"{raw_tool_output}\n\n"
+            f"### System Status\n"
+            f"* **Task Target**: `{user_request}`\n"
+            f"* **Execution Mode**: Native Windows OS Process / File Subsystem\n"
+            f"* **Operation**: Successfully executed."
+        )
     else:
         content_str = response.content if isinstance(response.content, str) else str(response.content)
 

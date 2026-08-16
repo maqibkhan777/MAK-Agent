@@ -1,0 +1,24 @@
+{
+  "mcpServers": {
+    "mak-agent-debugger": {
+      "command": "python",
+      "args": [
+        "mcp_debug_server.py"
+      ],
+      "env": {
+        "PYTHONUNBUFFERED": "1",
+        "PYTHONIOENCODING": "utf-8"
+      }
+    },
+    "mak-debugger": {
+      "command": "python",
+      "args": [
+        "mcp_debug_server.py"
+      ],
+      "env": {
+        "PYTHONUNBUFFERED": "1",
+        "PYTHONIOENCODING": "utf-8"
+      }
+    }
+  }
+}

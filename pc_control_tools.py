@@ -1,7 +1,11 @@
 import os
+import sys
 import shutil
+import platform
 import subprocess
 import winreg
+import webbrowser
+import psutil
 from typing import Optional, List
 from langchain_core.tools import tool
 
@@ -32,7 +36,48 @@ SYSTEM_APP_ALIASES = {
     "docker desktop": "Docker Desktop.exe",
     "mattermost": "Mattermost.exe",
     "settings": "ms-settings:",
+    "spotify": "Spotify.exe",
+    "slack": "slack.exe",
+    "discord": "Discord.exe",
+    "teams": "ms-teams.exe",
+    "zoom": "Zoom.exe",
+    "word": "WINWORD.EXE",
+    "excel": "EXCEL.EXE",
+    "powerpoint": "POWERPNT.EXE",
+    "camera": "microsoft.windows.camera:",
+    "photos": "ms-photos:",
+    "clock": "ms-clock:",
+    "alarms": "ms-clock:",
+    "store": "ms-windows-store:",
 }
+
+
+def _resolve_shortcut_target(lnk_path: str) -> Optional[str]:
+    """Extracts the underlying target executable path from a Windows .lnk shortcut."""
+    try:
+        import win32com.client
+        shell = win32com.client.Dispatch("WScript.Shell")
+        shortcut = shell.CreateShortCut(lnk_path)
+        target = shortcut.Targetpath
+        if target and os.path.exists(target):
+            return target
+    except Exception:
+        pass
+    return None
+
+
+def _activate_running_app_window(app_name: str) -> bool:
+    """Brings an already running application window to the active foreground."""
+    try:
+        import win32com.client
+        shell = win32com.client.Dispatch("WScript.Shell")
+        clean = os.path.splitext(os.path.basename(app_name))[0]
+        for name in [app_name, clean, clean.capitalize(), clean.title()]:
+            if shell.AppActivate(name):
+                return True
+    except Exception:
+        pass
+    return False
 
 
 def _find_app_in_start_menu_and_paths(clean_name: str) -> Optional[str]:
@@ -91,7 +136,6 @@ def _find_app_in_start_menu_and_paths(clean_name: str) -> Optional[str]:
             continue
         try:
             for root, _, files in os.walk(base_dir):
-                # Don't descend too deep into unrelated temp or cache folders
                 depth = root[len(base_dir):].count(os.sep)
                 if depth > 3:
                     continue
@@ -139,6 +183,11 @@ def resolve_application_path(app_name: str) -> Optional[str]:
     # 4. Search Start Menu shortcuts, Registry, and Program Files
     found_path = _find_app_in_start_menu_and_paths(clean_name)
     if found_path:
+        # If a .lnk shortcut was found, attempt to resolve the actual executable target
+        if found_path.lower().endswith(".lnk"):
+            exe_target = _resolve_shortcut_target(found_path)
+            if exe_target:
+                return exe_target
         return found_path
 
     return None
@@ -155,6 +204,10 @@ def run_application(app_name: str, app_path: str = "") -> str:
         if not target:
             return "Failed to launch application: No application name or path was provided."
 
+        # First, check if the app is already open and simply needs to be focused
+        if _activate_running_app_window(target):
+            return f"Application '{target}' is already running and has been brought to the foreground."
+
         resolved = resolve_application_path(target)
 
         if resolved:
@@ -163,13 +216,27 @@ def run_application(app_name: str, app_path: str = "") -> str:
                 os.startfile(resolved)
                 return f"Successfully opened system service: '{target}'."
             
-            # Launch shortcut (.lnk) or executable (.exe) using Windows Shell
+            # If it's an executable file, launch with native working directory to load bundles correctly
+            if os.path.isfile(resolved):
+                target_dir = os.path.dirname(resolved)
+                try:
+                    os.system(f'start "" /D "{target_dir}" "{resolved}"')
+                except Exception:
+                    subprocess.Popen([resolved], cwd=target_dir, shell=True)
+                
+                # Brief pause to allow window creation, then bring to front
+                import time
+                time.sleep(1)
+                _activate_running_app_window(target)
+                return f"Successfully launched '{target}' (resolved to: {resolved})."
+
+            # Launch shortcut (.lnk) using Windows Shell
             os.startfile(resolved)
             return f"Successfully launched '{target}' (resolved to: {resolved})."
         
-        # Fallback: attempt native os.startfile on raw target
+        # Fallback: attempt native start command
         try:
-            os.startfile(target)
+            os.system(f'start "" "{target}"')
             return f"Successfully launched '{target}'."
         except Exception:
             pass
@@ -223,6 +290,72 @@ def close_application(app_name: str) -> str:
 
 
 @tool
+def execute_system_command(command: str, working_directory: str = "") -> str:
+    """
+    Executes a native PowerShell or Windows Command Prompt command on the host machine.
+    Use this to run terminal utilities, scripts, network diagnostics (ipconfig, ping), git, or system commands.
+    """
+    try:
+        cwd = working_directory if (working_directory and os.path.exists(working_directory)) else os.getcwd()
+        res = subprocess.run(
+            ["powershell", "-NoProfile", "-NonInteractive", "-Command", command],
+            capture_output=True,
+            text=True,
+            cwd=cwd,
+            timeout=30
+        )
+        out = (res.stdout or "").strip()
+        err = (res.stderr or "").strip()
+        if res.returncode == 0:
+            return f"Command Output (Exit code 0):\n{out if out else '(Command executed successfully with no stdout)'}"
+        else:
+            return f"Command Failed (Exit code {res.returncode}):\n{err if err else out}"
+    except subprocess.TimeoutExpired:
+        return "Command timed out after 30 seconds."
+    except Exception as e:
+        return f"Execution error: {e}"
+
+
+@tool
+def get_system_metrics() -> str:
+    """
+    Retrieves live system hardware and OS status: CPU utilization %, RAM capacity and usage,
+    primary disk free space, OS version, host name, and active architecture.
+    """
+    try:
+        cpu_pct = psutil.cpu_percent(interval=0.5)
+        mem = psutil.virtual_memory()
+        disk = psutil.disk_usage(os.path.splitdrive(os.getcwd())[0] + "\\")
+        
+        info = [
+            "=== Windows Host System Metrics ===",
+            f"• OS: {platform.system()} {platform.release()} (Build {platform.version()})",
+            f"• Host Name: {platform.node()} ({platform.machine()})",
+            f"• CPU Utilization: {cpu_pct}% ({psutil.cpu_count(logical=True)} logical cores)",
+            f"• RAM: {round(mem.used / (1024**3), 2)} GB used / {round(mem.total / (1024**3), 2)} GB total ({mem.percent}%)",
+            f"• Primary Disk: {round(disk.used / (1024**3), 2)} GB used / {round(disk.total / (1024**3), 2)} GB total ({disk.percent}% used, {round(disk.free / (1024**3), 2)} GB free)"
+        ]
+        return "\n".join(info)
+    except Exception as e:
+        return f"Error gathering system metrics: {e}"
+
+
+@tool
+def open_url_in_browser(url: str) -> str:
+    """
+    Opens a website or web URL in the user's default web browser on their interactive desktop.
+    """
+    try:
+        clean_url = url.strip()
+        if not clean_url.startswith(("http://", "https://")):
+            clean_url = "https://" + clean_url
+        webbrowser.open(clean_url)
+        return f"Successfully opened URL in default web browser: {clean_url}"
+    except Exception as e:
+        return f"Error opening URL '{url}': {e}"
+
+
+@tool
 def search_local_file(file_name: str, search_directory: str = "") -> str:
     """
     Searches for a specific file by name within a given directory.
@@ -254,4 +387,11 @@ def search_local_file(file_name: str, search_directory: str = "") -> str:
 
 
 # Export tool list
-pc_tools = [run_application, close_application, search_local_file]
+pc_tools = [
+    run_application,
+    close_application,
+    execute_system_command,
+    get_system_metrics,
+    open_url_in_browser,
+    search_local_file
+]

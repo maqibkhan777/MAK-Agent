@@ -19,6 +19,20 @@ from dotenv import load_dotenv
 # Ensure environment variables are loaded
 load_dotenv()
 
+# Initialize debugpy DAP listener for IDE live attachment
+def init_debugpy_listener(host: str = "127.0.0.1", port: int = 5678):
+    """Initializes debugpy DAP bridge on startup for IDE process attachment without restarts."""
+    try:
+        import debugpy
+        debugpy.listen((host, port))
+        print(f"🐞 [MAK Server] debugpy listening on {host}:{port} (DAP bridge ready for IDE attach)")
+    except RuntimeError:
+        print(f"ℹ️ [MAK Server] debugpy listener already running on {host}:{port}")
+    except Exception as e:
+        print(f"⚠️ [MAK Server] debugpy initialization notice: {e}")
+
+init_debugpy_listener()
+
 # Import the core LangGraph agency orchestrator, KeyVault, and Memory Engine
 from main import run_agency
 from key_vault import vault
@@ -445,5 +459,132 @@ def search_cognified_memory(req: MemoryQueryRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.on_event("startup")
+async def startup_event():
+    """Ensure debugpy listener is active when FastAPI initializes."""
+    init_debugpy_listener()
+
+
+# =====================================================================
+# Human-in-the-Loop (HITL) Code & Dynamic Tool Approval Endpoints
+# =====================================================================
+class ToolProposalRequest(BaseModel):
+    tool_name: str = Field(..., description="Name of the dynamic tool to propose")
+    requirement: str = Field(..., description="Functional requirements and implementation prompt")
+
+class ToolApprovalRequest(BaseModel):
+    tool_name: str = Field(..., description="Name of the dynamic tool to approve or reject")
+    approved: bool = Field(default=True, description="True to deploy tool to registry, False to discard")
+
+class CodeValidationRequest(BaseModel):
+    code: str = Field(..., description="Raw Python code to validate syntax")
+
+class CodeApplyRequest(BaseModel):
+    file_path: str = Field(..., description="Target file path to write")
+    code_content: str = Field(..., description="Proposed Python code content")
+    approved: bool = Field(default=False, description="Explicit Human-in-the-Loop approval boolean flag")
+
+
+@app.post("/api/tools/propose", tags=["HITL Code & Tool Safety"])
+def propose_dynamic_tool_endpoint(req: ToolProposalRequest):
+    """
+    Synthesizes and tests a tool in sandbox containment.
+    Returns a structured payload with status AWAITING_APPROVAL, halting execution until approved.
+    """
+    try:
+        from master_orchestrator import propose_and_sandbox_tool
+        payload = propose_and_sandbox_tool(tool_name=req.tool_name, requirement=req.requirement)
+        return {
+            "status": "success",
+            "proposal": payload
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Tool proposal failed: {e}")
+
+
+@app.post("/api/tools/approve", tags=["HITL Code & Tool Safety"])
+def approve_dynamic_tool_endpoint(req: ToolApprovalRequest):
+    """
+    HITL Approval Gate: Explicit human authorization to ingest a verified sandboxed script
+    into the active runtime tool registry or reject and remove it.
+    """
+    try:
+        from master_orchestrator import approve_and_deploy_tool
+        result = approve_and_deploy_tool(tool_name=req.tool_name, approved=req.approved)
+        return {
+            "status": "success",
+            "result": result
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Tool approval resolution failed: {e}")
+
+
+@app.get("/api/tools/catalog", tags=["HITL Code & Tool Safety"])
+def get_tools_catalog_endpoint():
+    """Lists all dynamically created and approved tools in the active catalog."""
+    try:
+        from dynamic_tool_loader import list_dynamic_tools_catalog
+        catalog = list_dynamic_tools_catalog()
+        return {
+            "status": "success",
+            "tools": catalog,
+            "count": len(catalog)
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to fetch tool catalog: {e}")
+
+
+@app.post("/api/hitl/code/validate", tags=["HITL Code & Tool Safety"])
+def validate_code_syntax_endpoint(req: CodeValidationRequest):
+    """Validates Python code syntax using AST parser before proposing changes."""
+    try:
+        from engineering_department import python_syntax_checker
+        validation = python_syntax_checker.func(req.code)
+        is_valid = "Syntax is valid." in validation
+        return {
+            "status": "success" if is_valid else "invalid",
+            "valid": is_valid,
+            "details": validation
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Syntax validation failed: {e}")
+
+
+@app.post("/api/hitl/code/apply", tags=["HITL Code & Tool Safety"])
+def apply_code_change_hitl_endpoint(req: CodeApplyRequest):
+    """
+    Enforces strict Human-in-the-Loop approval gate before writing code changes to disk.
+    Rejects requests where approved is False.
+    """
+    if not req.approved:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="HITL Gate Blocked: Explicit human approval ('approved': true) is required before code changes can be written to disk."
+        )
+    try:
+        from engineering_department import python_syntax_checker
+        syntax_res = python_syntax_checker.func(req.code_content)
+        if "Syntax is valid." not in syntax_res:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Code syntax check failed: {syntax_res}"
+            )
+        
+        # Write file safely
+        target_abs = os.path.abspath(req.file_path)
+        os.makedirs(os.path.dirname(target_abs), exist_ok=True)
+        with open(target_abs, "w", encoding="utf-8") as f:
+            f.write(req.code_content)
+        return {
+            "status": "success",
+            "message": f"HITL Approved: File successfully written to {req.file_path}"
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to write file: {e}")
+
+
 if __name__ == "__main__":
     uvicorn.run("server:app", host="0.0.0.0", port=8000, reload=False)
+

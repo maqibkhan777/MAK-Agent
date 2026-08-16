@@ -226,23 +226,28 @@ def dynamic_browser_tool(url: str) -> str:
             except Exception:
                 pass
     else:
-        # Fallback to isolated headless engine if user's Chrome port 9222 is not actively listening
-        print(f"[MAK Browser Tool] Live port 9222 not open. Launching fast headless fallback engine for: {url}")
+        # Launch live visible browser engine so the user can watch the automation explore the web in real-time
+        print(f"[MAK Browser Tool] Launching live interactive browser window for: {url}")
         try:
             from playwright.sync_api import sync_playwright
             with sync_playwright() as p:
-                browser = p.chromium.launch(headless=True)
-                page = browser.new_page()
+                browser = p.chromium.launch(headless=False, args=["--start-maximized"])
+                context = browser.new_context(viewport=None)
+                page = context.new_page()
                 try:
-                    page.goto(url, wait_until="domcontentloaded", timeout=20000)
-                    page.wait_for_timeout(600)
+                    page.goto(url, wait_until="domcontentloaded", timeout=25000)
+                    # Live exploration pause allowing user to visually see the rendered page
+                    page.wait_for_timeout(2500)
+                    # Smooth scroll down to simulate real visual reading
+                    page.evaluate("window.scrollBy({ top: 600, behavior: 'smooth' });")
+                    page.wait_for_timeout(1500)
                 except Exception:
                     pass
                 text = page.inner_text("body")
                 browser.close()
                 if len(text) > 15000:
                     text = text[:15000] + "\n\n[...Content truncated for LLM context optimization...]"
-                return f"=== Web Navigation (Headless Fallback Engine) ===\nURL: {url}\n\n{text}"
+                return f"=== Live Web Browser Navigation ===\nURL: {url}\n\n{text}"
         except Exception as e:
             return f"Browser navigation error for {url}: {e}"
 

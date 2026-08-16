@@ -36,3 +36,8 @@ arize-phoenix>=4.0.0
 openinference-instrumentation-langchain>=0.1.0
 openinference-instrumentation-openai>=0.1.0
 deepeval>=1.0.0
+
+# Model Context Protocol (MCP) & IDE Debugger Bridge
+debugpy>=1.8.0
+mcp>=1.0.0
+

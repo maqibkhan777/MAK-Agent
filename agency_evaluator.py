@@ -84,6 +84,36 @@ test_suite = [
         "department": "Sales",
         "prompt": "Find the core homepage messaging for the company 'Anthropic'. Based on their current website text, draft a highly personalized cold email from me pitching our custom local AI agent architecture.",
         "expected_behavior": "The Lead Scraper must trigger the `b2b_company_scraper` tool to fetch Anthropic's live site data via DuckDuckGo, pass the context to the VP of Sales, who then formats a targeted cold email."
+    },
+    {
+        "department": "Content",
+        "prompt": "Create an omnichannel marketing launch for our new 'Local AI Desktop Agent'. I need a LinkedIn post, a 60-second TikTok script, B-roll instructions, and a photorealistic image generation prompt.",
+        "expected_behavior": "The Triage agent must route to 'content'. The 5-agent studio must execute sequentially and the final output MUST be a strict JSON object perfectly matching the OmnichannelDeliverable Pydantic schema."
+    },
+    {
+        "department": "Marketing",
+        "prompt": "Conduct SEO keyword research for 'Open Source Agentic Workflows' and draft a high-converting landing page copy based on the findings. Repurpose the core hooks into a Twitter thread.",
+        "expected_behavior": "The Triage agent must route to 'marketing'. The mini-crew (SEO Analyst -> Copywriter -> Social Manager -> CMO) must execute, utilizing the knowledge_tool to read Brand Guidelines, and output a cohesive marketing campaign."
+    },
+    {
+        "department": "Research",
+        "prompt": "Search for recent academic papers on ArXiv regarding 'Retrieval-Augmented Generation (RAG) in Multi-Agent Systems'. Provide a highly dense academic briefing summarizing the empirical results.",
+        "expected_behavior": "The Triage agent must route to 'research'. The agent must trigger the `arxiv_academic_scraper` tool to fetch actual research data and structure a scientific briefing without hallucinating citations or paper titles."
+    },
+    {
+        "department": "General Ops",
+        "prompt": "Search my local current directory for a file named 'requirements.txt' and list the first 3 dependencies it contains.",
+        "expected_behavior": "The Triage agent must route to 'general_ops'. The agent must autonomously trigger the `search_local_file` tool to locate the file, read its contents without hallucinating, and return the real dependencies."
+    },
+    {
+        "department": "CFO Synthesis",
+        "prompt": "We are considering acquiring a competitor for $20M. Analyze the potential capital structure impact and the M&A valuation synergies. Synthesize this into a final board recommendation.",
+        "expected_behavior": "The Triage agent must route to multiple corporate finance nodes (m_and_a, capital_structure) simultaneously. The Graph must merge their parallel reports, compress them via the Summarizer, and output a definitive CFO executive strategy report."
+    },
+    {
+        "department": "Tutor",
+        "prompt": "Explain the concept of a 'Discounted Cash Flow (DCF)' model step-by-step as if I am a beginner.",
+        "expected_behavior": "The Triage agent must route to 'tutor'. The agent must provide a clear, step-by-step educational breakdown of the financial concept without triggering web scrapers or complex corporate analysis."
     }
 ]
 

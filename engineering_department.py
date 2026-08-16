@@ -40,6 +40,7 @@ except ImportError:
 from finance_department import get_resilient_llm
 from custom_tools import live_web_search
 from surgeon_agent import restricted_file_writer, sandbox_test_runner
+from mcp_debug_server import trigger_ide_breakpoint, inspect_variable_value
 
 
 # =====================================================================
@@ -131,31 +132,40 @@ class EngineeringDepartment:
     def create_code_surgeon(self) -> Agent:
         """
         Code Surgeon: Tasked with writing clean, modular, and self-documenting Python code.
-        Equipped with python_syntax_checker and hitl_file_writer tools.
+        Equipped with python_syntax_checker, hitl_file_writer, restricted_file_writer,
+        trigger_ide_breakpoint, and inspect_variable_value tools.
         Strictly mandated to validate syntax BEFORE requesting manual human terminal approval.
         """
-        tools = (
-            [python_syntax_checker, hitl_file_writer, restricted_file_writer, sandbox_test_runner, self.knowledge_tool, live_web_search]
-            if self.knowledge_tool
-            else [python_syntax_checker, hitl_file_writer, restricted_file_writer, sandbox_test_runner, live_web_search]
-        )
+        base_tools = [
+            python_syntax_checker,
+            hitl_file_writer,
+            restricted_file_writer,
+            sandbox_test_runner,
+            trigger_ide_breakpoint,
+            inspect_variable_value,
+            live_web_search
+        ]
+        if self.knowledge_tool:
+            base_tools.append(self.knowledge_tool)
+
         return Agent(
             role="Code Surgeon",
             goal=(
                 "Write clean, modular, production-ready, and self-documenting Python code and tools. "
                 "When requested to build, create, or expand tools (e.g. Google Calendar, API clients, utilities), "
                 "use the 'Restricted File Writer' tool to save the implementation in the dynamic_tools/ sandbox, "
-                "validate syntax with 'Python Syntax Checker', and execute it with 'Sandbox Test Runner'."
+                "validate syntax with 'Python Syntax Checker', execute it with 'Sandbox Test Runner', and use "
+                "'Trigger IDE Breakpoint' or 'Inspect Variable Value' if debugging is necessary."
             ),
             backstory=(
                 "You are an elite Code Surgeon and AI Metaprogramming Specialist. You design scalable Python applications, "
                 "autonomous tool integrations, and robust utilities. When building new capabilities or tools, you write "
                 "complete, self-contained Python scripts, save them to dynamic_tools/ using the Restricted File Writer, "
-                "and verify them using the Sandbox Test Runner and Python Syntax Checker."
+                "verify them using the Sandbox Test Runner and Python Syntax Checker, and coordinate with the IDE debugger."
             ),
-            tools=tools,
+            tools=base_tools,
             verbose=True,
-            memory=True,
+            memory=False,
             llm=self.llm
         )
 
@@ -164,23 +174,34 @@ class EngineeringDepartment:
         QA Tester: Senior code reviewer that inspects the Code Surgeon's proposed code, audits edge cases,
         syntax errors, and verifies LangGraph orchestrator architecture compatibility before human approval.
         """
-        tools = [sandbox_test_runner, python_syntax_checker, self.knowledge_tool, live_web_search] if self.knowledge_tool else [sandbox_test_runner, python_syntax_checker, live_web_search]
+        base_tools = [
+            sandbox_test_runner,
+            python_syntax_checker,
+            trigger_ide_breakpoint,
+            inspect_variable_value,
+            live_web_search
+        ]
+        if self.knowledge_tool:
+            base_tools.append(self.knowledge_tool)
+
         return Agent(
             role="QA Tester",
             goal=(
                 "Ruthlessly review the Code Surgeon's proposed Python code for syntax correctness, edge case resilience, "
-                "security vulnerabilities, and verify that it compiles and passes sandbox execution tests."
+                "security vulnerabilities, verify that it compiles and passes sandbox execution tests, and trigger "
+                "IDE breakpoints or inspect variables when diagnosing runtime defects."
             ),
             backstory=(
                 "You are a seasoned Senior QA Tester and Code Reviewer with deep expertise in Python systems, unit testing, "
                 "LangGraph state orchestration, and software failure modes. You verify AST syntax and sandbox execution logs "
                 "to ensure code is 100% production-ready."
             ),
-            tools=tools,
+            tools=base_tools,
             verbose=True,
-            memory=True,
+            memory=False,
             llm=self.llm
         )
+
 
     def create_cto(self) -> Agent:
         """Chief Technology Officer: Maintained for backwards compatibility with main.py pipeline."""
@@ -211,7 +232,7 @@ class EngineeringDepartment:
 def get_engineering_team(llm: Optional[LLM] = None, knowledge_tool: Any = None) -> List[Agent]:
     """
     Module-level factory function returning the core two-agent Engineering Team:
-    1. Code Surgeon (Equipped with AST Python Syntax Checker + HITL File Writer for safe, validated Python code generation)
+    1. Code Surgeon (Equipped with AST Python Syntax Checker + HITL File Writer + IDE Debugger Tools for safe, validated Python code generation)
     2. QA Tester (Senior code reviewer auditing edge cases & LangGraph architecture safety)
     """
     dept = EngineeringDepartment(llm=llm, knowledge_tool=knowledge_tool)
@@ -221,6 +242,9 @@ def get_engineering_team(llm: Optional[LLM] = None, knowledge_tool: Any = None) 
 __all__ = [
     "python_syntax_checker",
     "hitl_file_writer",
+    "trigger_ide_breakpoint",
+    "inspect_variable_value",
     "EngineeringDepartment",
     "get_engineering_team",
 ]
+

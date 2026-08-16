@@ -1,0 +1,26 @@
+{
+  "mcpServers": {
+    "mak-agent-debugger": {
+      "command": "${workspaceFolder}/.venv/Scripts/python.exe",
+      "args": [
+        "${workspaceFolder}/mcp_debug_server.py"
+      ],
+      "env": {
+        "PYTHONPATH": "${workspaceFolder}",
+        "PYTHONUNBUFFERED": "1",
+        "PYTHONIOENCODING": "utf-8"
+      }
+    },
+    "mak-debugger": {
+      "command": "${workspaceFolder}/.venv/Scripts/python.exe",
+      "args": [
+        "${workspaceFolder}/mcp_debug_server.py"
+      ],
+      "env": {
+        "PYTHONPATH": "${workspaceFolder}",
+        "PYTHONUNBUFFERED": "1",
+        "PYTHONIOENCODING": "utf-8"
+      }
+    }
+  }
+}
